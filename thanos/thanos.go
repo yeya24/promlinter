@@ -5,7 +5,7 @@ package thanos
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+	. "github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/yeya24/promlinter/test"
 )
 
@@ -26,9 +26,12 @@ func main() {
 	//a := prometheus.HistogramOpts{
 	//	Name: aaa,
 	//}
-	_ = promauto.NewCounterVec(
+	//g := func() promauto.Factory {
+	//	return promauto.With(nil)
+	//}
+	_ = NewCounterVec(
 		prometheus.CounterOpts{
-			Name: test.G,
+			Name: test.G + "aaa",
 			Help: bbb,
 		},
 		[]string{},

@@ -1,10 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,37 +18,32 @@ func main() {
 	files := app.Arg("files", "").Strings()
 
 	kingpin.MustParse(app.Parse(os.Args[1:]))
-
-	var paths []string
-	var fs []*ast.File
-	fset := token.NewFileSet()
-
 	c := promlinter.NewChecker()
 
 	c.CheckPackages(*files...)
 
 
-	for _, path := range *files {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			os.Exit(1)
-		}
-		for f := range findFiles(path) {
-			file, err := parser.ParseFile(fset, f, nil, parser.SpuriousErrors)
-			if err != nil {
-				os.Exit(1)
-			}
-			fs = append(fs, file)
-			paths = append(paths, f)
-		}
-	}
-
-	s := promlinter.Settings{}
-	for i := range fs {
-		issues := promlinter.Run(fs[i], fset, s)
-		for _, iss := range issues {
-			fmt.Printf("%s: %s\n", iss.Metric, iss.Text)
-		}
-	}
+	//for _, path := range *files {
+	//	if _, err := os.Stat(path); os.IsNotExist(err) {
+	//		os.Exit(1)
+	//	}
+	//	for f := range findFiles(path) {
+	//		file, err := parser.ParseFile(fset, f, nil, parser.SpuriousErrors)
+	//		if err != nil {
+	//			os.Exit(1)
+	//		}
+	//		fs = append(fs, file)
+	//		paths = append(paths, f)
+	//	}
+	//}
+	//
+	//s := promlinter.Settings{}
+	//for i := range fs {
+	//	issues := promlinter.Run(fs[i], fset, s)
+	//	for _, iss := range issues {
+	//		fmt.Printf("%s: %s\n", iss.Metric, iss.Text)
+	//	}
+	//}
 
 }
 
