@@ -24,4 +24,35 @@ func main() {
 		},
 		[]string{},
 	)
+
+	// good
+	f := promauto.With(prometheus.NewRegistry())
+	_ = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "test_metric_total",
+			Help: "",
+		},
+		[]string{},
+	)
+
+	// good
+	_ = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "test_metric_total",
+			Help: "",
+		},
+		[]string{},
+	)
+
+	// good
+	desc := prometheus.NewDesc(
+		"prometheus_operator_spec_replicas",
+		"Number of expected replicas for the object.",
+		[]string{
+			"namespace",
+			"name",
+		}, nil,
+	)
+	ch := make(chan<- prometheus.Metric)
+	ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, 1)
 }

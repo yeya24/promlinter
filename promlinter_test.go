@@ -1,6 +1,7 @@
 package promlinter
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"testing"
@@ -13,7 +14,7 @@ func TestRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues := Run(file, fs)
+	issues := Run(fs, []*ast.File{file}, false)
 	if len(issues) != 2 {
 		t.Fatal()
 	}

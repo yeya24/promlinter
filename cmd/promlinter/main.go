@@ -19,35 +19,30 @@ func main() {
 	app.Version("v0.0.1")
 	app.HelpFlag.Short('h')
 
-	files := app.Arg("files", "").Strings()
+	paths := app.Arg("files", "").Strings()
+	strict := app.Flag("strict", "").Default("false").Bool()
 
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
-	var paths []string
-	var fs []*ast.File
-	fset := token.NewFileSet()
+	var files []*ast.File
+	fileSet := token.NewFileSet()
 
-	for _, path := range *files {
+	for _, path := range *paths {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			os.Exit(1)
 		}
 		for f := range findFiles(path) {
-			file, err := parser.ParseFile(fset, f, nil, parser.AllErrors)
+			file, err := parser.ParseFile(fileSet, f, nil, parser.AllErrors)
 			if err != nil {
 				os.Exit(1)
 			}
-			fs = append(fs, file)
-			paths = append(paths, f)
+			files = append(files, file)
 		}
 	}
 
-	for i := range fs {
-		issues := promlinter.Run(fs[i], fset)
-		for _, iss := range issues {
-			fmt.Printf("%s: %s\n", iss.Metric, iss.Text)
-		}
+	for _, iss := range promlinter.Run(fileSet, files, *strict) {
+		fmt.Printf("%s %s %s\n", iss.Pos, iss.Metric, iss.Text)
 	}
-
 }
 
 func findFiles(root string) chan string {
