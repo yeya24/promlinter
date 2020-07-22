@@ -4,14 +4,20 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil/promlint"
 	dto "github.com/prometheus/client_model/go"
 )
 
-var metricsType map[string]dto.MetricType
+var (
+	metricsType     map[string]dto.MetricType
+	constMetricArgs map[string]int
+	validOptsFields map[string]bool
+)
 
 func init() {
 	metricsType = map[string]dto.MetricType{
@@ -24,133 +30,152 @@ func init() {
 		"NewSummary":      dto.MetricType_SUMMARY,
 		"NewSummaryVec":   dto.MetricType_SUMMARY,
 	}
+
+	constMetricArgs = map[string]int{
+		"MustNewConstMetric": 3,
+		"MustNewHistogram":   4,
+		"MustNewSummary":     4,
+	}
+
+	// Doesn't contain ConstLabels since we don't need this field here.
+	validOptsFields = map[string]bool{
+		"Name":      true,
+		"Namespace": true,
+		"Subsystem": true,
+		"Help":      true,
+	}
 }
 
-// Issue contains a description of linting error
+// Issue contains metric name, error text and metric position.
 type Issue struct {
 	Pos    token.Position
 	Metric string
 	Text   string
 }
 
-// Run runs this linter on the provided code.
-func Run(file *ast.File, fset *token.FileSet) []Issue {
-	issues := []Issue{}
+type visitor struct {
+	fs      *token.FileSet
+	metrics map[*dto.MetricFamily]token.Position
+	issues  []Issue
+	strict  bool
+}
 
-	var (
-		name         string
-		promautoName string
-	)
-	for _, pkg := range file.Imports {
-		switch pkg.Path.Value {
-		case `"github.com/prometheus/client_golang/prometheus"`:
-			if pkg.Name != nil {
-				name = pkg.Name.Name
-			} else {
-				name = "prometheus"
-			}
+type opt struct {
+	namespace string
+	subsystem string
+	name      string
+}
 
-		case `"github.com/prometheus/client_golang/prometheus/promauto"`:
-			if pkg.Name != nil {
-				promautoName = pkg.Name.Name
-			} else {
-				promautoName = "promauto"
-			}
-		}
+func Run(fs *token.FileSet, files []*ast.File, strict bool) []Issue {
+	v := &visitor{
+		fs:      fs,
+		metrics: make(map[*dto.MetricFamily]token.Position, 0),
+		issues:  make([]Issue, 0),
+		strict:  strict,
 	}
 
-	l := &metric{
-		fileName:     file.Name.Name,
-		packageName:  name,
-		promautoName: promautoName,
+	for _, file := range files {
+		ast.Walk(v, file)
 	}
 
-	ast.Walk(l, file)
-
-	if len(l.Metrics) > 0 {
-		lint := promlint.NewWithMetricFamilies(l.Metrics)
-		problems, err := lint.Lint()
+	// lint metrics
+	for metric := range v.metrics {
+		problems, err := promlint.NewWithMetricFamilies([]*dto.MetricFamily{metric}).Lint()
 		if err != nil {
 			panic(err)
 		}
 
 		for _, p := range problems {
-			issues = append(issues, Issue{
-				Pos:    token.Position{},
+			v.issues = append(v.issues, Issue{
+				Pos:    v.metrics[metric],
 				Metric: p.Metric,
 				Text:   p.Text,
 			})
 		}
 	}
-	return issues
+
+	sort.Slice(v.issues, func(i, j int) bool {
+		return v.issues[i].Pos.String() < v.issues[j].Pos.String()
+	})
+	return v.issues
 }
 
-type metric struct {
-	fileName     string
-	packageName  string
-	promautoName string
-	Metrics      []*dto.MetricFamily
-}
-
-func (l *metric) Visit(n ast.Node) ast.Visitor {
+func (v *visitor) Visit(n ast.Node) ast.Visitor {
 	if n == nil {
-		return l
-	}
-	ce, ok := n.(*ast.CallExpr)
-	if !ok {
-		return l
-	}
-	se, ok := ce.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return l
+		return v
 	}
 
-	switch se.X.(type) {
-	case *ast.Ident:
-		id := se.X.(*ast.Ident)
-		if id.Name != l.packageName && id.Name != l.promautoName {
-			return l
-		}
-
+	switch t := n.(type) {
 	case *ast.CallExpr:
-		innerCE := se.X.(*ast.CallExpr)
+		return v.parseCallerExpr(t)
 
-		switch innerCE.Fun.(type) {
-		case *ast.Ident:
-			innerID := innerCE.Fun.(*ast.Ident)
-			if l.promautoName != "." || innerID.Name != "With" {
-				return l
-			}
+	case *ast.SendStmt:
+		return v.parseSendMetricChanExpr(t)
+	}
 
-		case *ast.SelectorExpr:
-			funSE := innerCE.Fun.(*ast.SelectorExpr)
-			if funSE.Sel.Name != "With" {
-				return l
-			}
+	return v
+}
 
-			funXID, ok := funSE.X.(*ast.Ident)
-			if !ok {
-				return l
-			}
+func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
+	var (
+		metricType dto.MetricType
+		methodName string
+		ok         bool
+	)
+	switch stmt := call.Fun.(type) {
 
-			if funXID.Name != l.promautoName {
-				return l
-			}
+	/*
+		That's the case of setting alias . to client_golang/prometheus or promauto package.
+
+			import . "github.com/prometheus/client_golang/prometheus"
+			metric := NewCounter(CounterOpts{})
+	*/
+	case *ast.Ident:
+		if metricType, ok = metricsType[stmt.Name]; !ok {
+			return v
 		}
+		methodName = stmt.Name
+
+	/*
+		This case covers the most of cases to initialize metrics.
+
+			prometheus.NewCounter(CounterOpts{})
+
+			promauto.With(nil).NewCounter(CounterOpts{})
+
+			factory := promauto.With(nil)
+			factory.NewCounter(CounterOpts{})
+	*/
+	case *ast.SelectorExpr:
+		if metricType, ok = metricsType[stmt.Sel.Name]; !ok {
+			return v
+		}
+		methodName = stmt.Sel.Name
+
+	default:
+		return v
 	}
 
-	metricType, ok := metricsType[se.Sel.Name]
-	if !ok {
-		return l
+	argNum := 1
+	if strings.HasSuffix(methodName, "Vec") {
+		argNum = 2
+	}
+	// The methods used to initialize metrics should have at least one arg.
+	if len(call.Args) < 1 && v.strict {
+		v.issues = append(v.issues, Issue{
+			Pos:    v.fs.Position(call.Pos()),
+			Metric: "",
+			Text:   fmt.Sprintf("%s should have at least %d arguments", methodName, argNum),
+		})
+		return v
 	}
 
-	// Check first arg, that should have basic lit with capital
-	if len(ce.Args) < 1 {
-		return l
-	}
-	opts, help := parseOpts(ce.Args[0])
+	// position for the first arg of the CallExpr
+	optsPosition := v.fs.Position(call.Args[0].Pos())
+
+	opts, help := v.parseOpts(call.Args[0])
 	if opts == nil {
-		return l
+		return v
 	}
 
 	currentMetric := dto.MetricFamily{
@@ -158,75 +183,248 @@ func (l *metric) Visit(n ast.Node) ast.Visitor {
 		Help: help,
 	}
 
-	metricName := prometheus.BuildFQName(opts.namespace, opts.sub, opts.name)
+	metricName := prometheus.BuildFQName(opts.namespace, opts.subsystem, opts.name)
 	currentMetric.Name = &metricName
 
-	l.Metrics = append(l.Metrics, &currentMetric)
-	return l
+	v.metrics[&currentMetric] = optsPosition
+	return v
 }
 
-func parseOpts(n ast.Node) (*opt, *string) {
-	metricOption := &opt{}
-	var help *string
-	if option, ok := n.(*ast.CompositeLit); ok {
-		for _, elt := range option.Elts {
-			kvExpr, ok := elt.(*ast.KeyValueExpr)
-			if !ok {
-				continue
-			}
-			object, ok := kvExpr.Key.(*ast.Ident)
-			if !ok {
-				continue
-			}
-
-			stringLiteral, ok := parseValue(kvExpr.Value)
-			if !ok {
-				continue
-			}
-
-			switch object.Name {
-			case "Namespace":
-				metricOption.namespace = stringLiteral
-			case "Subsystem":
-				metricOption.sub = stringLiteral
-			case "Name":
-				metricOption.name = stringLiteral
-			case "Help":
-				help = &stringLiteral
-			}
+func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
+	var (
+		ok             bool
+		requiredArgNum int
+		methodName     string
+		metricType     dto.MetricType
+	)
+	call, ok := chExpr.Value.(*ast.CallExpr)
+	if !ok {
+		return v
+	}
+	switch stmt := call.Fun.(type) {
+	case *ast.Ident:
+		if requiredArgNum, ok = constMetricArgs[stmt.Name]; !ok {
+			return v
 		}
+		methodName = stmt.Name
 
-		return metricOption, help
+	case *ast.SelectorExpr:
+		if requiredArgNum, ok = constMetricArgs[stmt.Sel.Name]; !ok {
+			return v
+		}
+		methodName = stmt.Sel.Name
 	}
 
-	if identName, ok := n.(*ast.Ident); ok {
-		fmt.Println(identName.Obj)
+	if len(call.Args) < requiredArgNum && v.strict {
+		v.issues = append(v.issues, Issue{
+			Pos:    v.fs.Position(call.Pos()),
+			Metric: "",
+			Text:   fmt.Sprintf("%s should have at least %d arguments", methodName, requiredArgNum),
+		})
+		return v
+	}
+
+	name, help := v.parseConstMetricOpts(call.Args[0])
+	if name == nil {
+		return v
+	}
+
+	metric := &dto.MetricFamily{
+		Name: name,
+		Help: help,
+	}
+	switch methodName {
+	case "MustNewConstMetric":
+		switch t := call.Args[1].(type) {
+		case *ast.Ident:
+			metric.Type = getConstMetricType(t.Name)
+		case *ast.SelectorExpr:
+			metric.Type = getConstMetricType(t.Sel.Name)
+		}
+
+	case "MustNewHistogram":
+		metricType = dto.MetricType_HISTOGRAM
+		metric.Type = &metricType
+	case "MustNewSummary":
+		metricType = dto.MetricType_SUMMARY
+		metric.Type = &metricType
+	}
+
+	v.metrics[metric] = v.fs.Position(call.Pos())
+	return v
+}
+
+func (v *visitor) parseOpts(n ast.Node) (*opt, *string) {
+	switch stmt := n.(type) {
+	case *ast.CompositeLit:
+		return v.parseCompositeOpts(stmt)
+
+	case *ast.Ident:
+		if stmt.Obj != nil {
+			if decl, ok := stmt.Obj.Decl.(*ast.AssignStmt); ok && len(decl.Rhs) > 0 {
+				if t, ok := decl.Rhs[0].(*ast.CompositeLit); ok {
+					return v.parseCompositeOpts(t)
+				}
+			}
+		}
 	}
 
 	return nil, nil
 }
 
-func parseValue(n ast.Node) (string, bool) {
+func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) (*opt, *string) {
+	metricOption := &opt{}
+	var help *string
+	for _, elt := range stmt.Elts {
+		kvExpr, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		object, ok := kvExpr.Key.(*ast.Ident)
+		if !ok {
+			continue
+		}
+
+		if _, ok := validOptsFields[object.Name]; !ok {
+			continue
+		}
+
+		// If failed to parse field value, stop parsing.
+		stringLiteral, ok := v.parseValue(object.Name, kvExpr.Value)
+		if !ok {
+			return nil, nil
+		}
+
+		switch object.Name {
+		case "Namespace":
+			metricOption.namespace = stringLiteral
+		case "Subsystem":
+			metricOption.subsystem = stringLiteral
+		case "Name":
+			metricOption.name = stringLiteral
+		case "Help":
+			help = &stringLiteral
+		}
+	}
+
+	return metricOption, help
+}
+
+func (v *visitor) parseValue(object string, n ast.Node) (string, bool) {
 	switch t := n.(type) {
+
+	// make sure it is string literal value
 	case *ast.BasicLit:
-		return mustUnquote(t.Value), true
+		if t.Kind == token.STRING {
+			return mustUnquote(t.Value), true
+		}
+
+		return "", false
+
 	case *ast.Ident:
 		if t.Obj == nil {
 			return "", false
 		}
-		if vs, ok := t.Obj.Decl.(*ast.ValueSpec); !ok {
-			return "", false
-		} else {
-			return parseValue(vs)
+
+		if vs, ok := t.Obj.Decl.(*ast.ValueSpec); ok {
+			return v.parseValue(object, vs)
 		}
+
 	case *ast.ValueSpec:
 		if len(t.Values) == 0 {
 			return "", false
 		}
-		return parseValue(t.Values[0])
+		return v.parseValue(object, t.Values[0])
+
+	// For binary expr, we only support adding two strings like `foo` + `bar`.
+	case *ast.BinaryExpr:
+		if t.Op == token.ADD {
+			x, ok := v.parseValue(object, t.X)
+			if !ok {
+				return "", false
+			}
+
+			y, ok := v.parseValue(object, t.Y)
+			if !ok {
+				return "", false
+			}
+
+			return x + y, true
+		}
+
 	default:
-		return "", false
+		if v.strict {
+			v.issues = append(v.issues, Issue{
+				Pos:    v.fs.Position(n.Pos()),
+				Metric: "",
+				Text:   fmt.Sprintf("parsing field %s with type %T is not supported", object, t),
+			})
+		}
 	}
+
+	return "", false
+}
+
+func (v *visitor) parseConstMetricOpts(n ast.Node) (*string, *string) {
+	switch stmt := n.(type) {
+	case *ast.CallExpr:
+		return v.parseNewDescCallExpr(stmt)
+
+	case *ast.Ident:
+		if stmt.Obj != nil {
+			switch t := stmt.Obj.Decl.(type) {
+			case *ast.AssignStmt:
+				if len(t.Rhs) > 0 {
+					if call, ok := t.Rhs[0].(*ast.CallExpr); ok {
+						return v.parseNewDescCallExpr(call)
+					}
+				}
+			case *ast.ValueSpec:
+				if len(t.Values) > 0 {
+					if call, ok := t.Values[0].(*ast.CallExpr); ok {
+						return v.parseNewDescCallExpr(call)
+					}
+				}
+			}
+
+			if v.strict {
+				v.issues = append(v.issues, Issue{
+					Pos:    v.fs.Position(n.Pos()),
+					Metric: "",
+					Text:   fmt.Sprintf("parsing desc of type %T is not supported", stmt.Obj.Decl),
+				})
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
+	var (
+		help string
+		name string
+		ok   bool
+	)
+	if len(call.Args) != 4 && v.strict {
+		v.issues = append(v.issues, Issue{
+			Pos:    v.fs.Position(call.Pos()),
+			Metric: "",
+			Text:   "NewDesc should have 4 args",
+		})
+		return nil, nil
+	}
+
+	name, ok = v.parseValue("fqName", call.Args[0])
+	if !ok {
+		return nil, nil
+	}
+	help, ok = v.parseValue("help", call.Args[1])
+	if !ok {
+		return nil, nil
+	}
+
+	return &name, &help
 }
 
 func mustUnquote(str string) string {
@@ -238,9 +436,13 @@ func mustUnquote(str string) string {
 	return stringLiteral
 }
 
-type opt struct {
-	namespace string
-	sub       string
-	name      string
-	help      string
+func getConstMetricType(name string) *dto.MetricType {
+	metricType := dto.MetricType_UNTYPED
+	if name == "CounterValue" {
+		metricType = dto.MetricType_COUNTER
+	} else if name == "GaugeValue" {
+		metricType = dto.MetricType_GAUGE
+	}
+
+	return &metricType
 }
