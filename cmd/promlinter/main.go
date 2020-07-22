@@ -15,12 +15,12 @@ import (
 )
 
 func main() {
-	app := kingpin.New(filepath.Base(os.Args[0]), "Prometheus metrics linter tool golang.")
+	app := kingpin.New(filepath.Base(os.Args[0]), "Prometheus metrics linter tool for golang.")
 	app.Version("v0.0.1")
 	app.HelpFlag.Short('h')
 
 	paths := app.Arg("files", "").Strings()
-	strict := app.Flag("strict", "").Default("false").Bool()
+	strict := app.Flag("strict", "Strict mode. If true, linter will output more issues including parsing failures.").Default("false").Bool()
 
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
