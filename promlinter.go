@@ -211,6 +211,9 @@ func parseValue(n ast.Node) (string, bool) {
 	case *ast.BasicLit:
 		return mustUnquote(t.Value), true
 	case *ast.Ident:
+		if t.Obj == nil {
+			return "", false
+		}
 		if vs, ok := t.Obj.Decl.(*ast.ValueSpec); !ok {
 			return "", false
 		} else {
