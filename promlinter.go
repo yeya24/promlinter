@@ -429,11 +429,13 @@ func (v *visitor) parseValueCallExpr(object string, call *ast.CallExpr) (string,
 		return prometheus.BuildFQName(namespace, subsystem, name), true
 	}
 
-	v.issues = append(v.issues, Issue{
-		Pos:    v.fs.Position(call.Pos()),
-		Metric: "",
-		Text:   fmt.Sprintf("parsing %s with Method Name %s is not supported", object, methodName),
-	})
+	if v.strict {
+		v.issues = append(v.issues, Issue{
+			Pos:    v.fs.Position(call.Pos()),
+			Metric: "",
+			Text:   fmt.Sprintf("parsing %s with Method %s is not supported", object, methodName),
+		})
+	}
 
 	return "", false
 }

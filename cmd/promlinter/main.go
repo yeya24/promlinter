@@ -20,7 +20,8 @@ func main() {
 	app.HelpFlag.Short('h')
 
 	paths := app.Arg("files", "Files to lint.").Strings()
-	strict := app.Flag("strict", "Strict mode. If true, linter will output more issues including parsing failures.").Default("false").Bool()
+	strict := app.Flag("strict", "Strict mode. If true, linter will output more issues including parsing failures.").
+		Default("false").Short('s').Bool()
 
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
