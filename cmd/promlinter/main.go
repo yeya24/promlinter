@@ -42,7 +42,7 @@ func main() {
 	}
 
 	for _, iss := range promlinter.Run(fileSet, files, *strict) {
-		fmt.Printf("%s %s %s\n", iss.Pos, iss.Metric, iss.Text)
+		fmt.Printf("%s %s %s %s\n", iss.Pos.Start, iss.Pos.End, iss.Metric, iss.Text)
 	}
 }
 
