@@ -122,6 +122,7 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 		methodName string
 		ok         bool
 	)
+
 	switch stmt := call.Fun.(type) {
 
 	/*
@@ -131,6 +132,14 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 			metric := NewCounter(CounterOpts{})
 	*/
 	case *ast.Ident:
+		if stmt.Name == "NewCounterFunc" {
+			return v.parseOpts(call.Args[0], dto.MetricType_COUNTER)
+		}
+
+		if stmt.Name == "NewGaugeFunc" {
+			return v.parseOpts(call.Args[0], dto.MetricType_GAUGE)
+		}
+
 		if metricType, ok = metricsType[stmt.Name]; !ok {
 			return v
 		}
@@ -145,8 +154,18 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 
 			factory := promauto.With(nil)
 			factory.NewCounter(CounterOpts{})
+
+			prometheus.NewCounterFunc()
 	*/
 	case *ast.SelectorExpr:
+		if stmt.Sel.Name == "NewCounterFunc" {
+			return v.parseOpts(call.Args[0], dto.MetricType_COUNTER)
+		}
+
+		if stmt.Sel.Name == "NewGaugeFunc" {
+			return v.parseOpts(call.Args[0], dto.MetricType_GAUGE)
+		}
+
 		if metricType, ok = metricsType[stmt.Sel.Name]; !ok {
 			return v
 		}
@@ -161,7 +180,7 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 		argNum = 2
 	}
 	// The methods used to initialize metrics should have at least one arg.
-	if len(call.Args) < 1 && v.strict {
+	if len(call.Args) < argNum && v.strict {
 		v.issues = append(v.issues, Issue{
 			Pos:    v.fs.Position(call.Pos()),
 			Metric: "",
@@ -170,14 +189,16 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 		return v
 	}
 
-	// position for the first arg of the CallExpr
-	optsPosition := v.fs.Position(call.Args[0].Pos())
+	return v.parseOpts(call.Args[0], metricType)
+}
 
-	opts, help := v.parseOpts(call.Args[0])
+func (v *visitor) parseOpts(optArg ast.Node, metricType dto.MetricType) ast.Visitor {
+	// position for the first arg of the CallExpr
+	optsPosition := v.fs.Position(optArg.Pos())
+	opts, help := v.parseOptsExpr(optArg)
 	if opts == nil {
 		return v
 	}
-
 	currentMetric := dto.MetricFamily{
 		Type: &metricType,
 		Help: help,
@@ -197,10 +218,12 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		methodName     string
 		metricType     dto.MetricType
 	)
+
 	call, ok := chExpr.Value.(*ast.CallExpr)
 	if !ok {
 		return v
 	}
+
 	switch stmt := call.Fun.(type) {
 	case *ast.Ident:
 		if requiredArgNum, ok = constMetricArgs[stmt.Name]; !ok {
@@ -224,7 +247,7 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		return v
 	}
 
-	name, help := v.parseConstMetricOpts(call.Args[0])
+	name, help := v.parseConstMetricOptsExpr(call.Args[0])
 	if name == nil {
 		return v
 	}
@@ -254,7 +277,7 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 	return v
 }
 
-func (v *visitor) parseOpts(n ast.Node) (*opt, *string) {
+func (v *visitor) parseOptsExpr(n ast.Node) (*opt, *string) {
 	switch stmt := n.(type) {
 	case *ast.CompositeLit:
 		return v.parseCompositeOpts(stmt)
@@ -365,7 +388,7 @@ func (v *visitor) parseValue(object string, n ast.Node) (string, bool) {
 	return "", false
 }
 
-func (v *visitor) parseConstMetricOpts(n ast.Node) (*string, *string) {
+func (v *visitor) parseConstMetricOptsExpr(n ast.Node) (*string, *string) {
 	switch stmt := n.(type) {
 	case *ast.CallExpr:
 		return v.parseNewDescCallExpr(stmt)
