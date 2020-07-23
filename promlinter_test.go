@@ -15,7 +15,7 @@ func TestRun(t *testing.T) {
 	}
 
 	issues := Run(fs, []*ast.File{file}, false)
-	if len(issues) != 2 {
+	if len(issues) != 3 {
 		t.Fatal()
 	}
 
@@ -24,6 +24,10 @@ func TestRun(t *testing.T) {
 	}
 
 	if issues[1].Metric != "test_metric_total" && issues[0].Text != `no help text` {
+		t.Fatal()
+	}
+
+	if issues[2].Metric != "foo" && issues[0].Text != `counter metrics should have "_total" suffix` {
 		t.Fatal()
 	}
 }

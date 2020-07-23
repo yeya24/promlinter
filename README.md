@@ -38,7 +38,7 @@ Flags:
       --strict   Strict mode. If true, linter will output more issues including parsing failures.
 
 Args:
-  [<files>]  
+  [<files>]  Files to lint.
 
 ```
 

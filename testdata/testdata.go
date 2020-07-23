@@ -25,6 +25,14 @@ func main() {
 		[]string{},
 	)
 
+	// NewCounterFunc, should have _total suffix
+	_ = promauto.NewCounterFunc(prometheus.CounterOpts{
+		Name: "foo",
+		Help: "bar",
+	}, func() float64 {
+		return 1
+	})
+
 	// good
 	f := promauto.With(prometheus.NewRegistry())
 	_ = f.NewCounterVec(
