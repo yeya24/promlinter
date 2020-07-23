@@ -15,7 +15,7 @@ func TestRun(t *testing.T) {
 	}
 
 	issues := Run(fs, []*ast.File{file}, false)
-	if len(issues) != 3 {
+	if len(issues) != 6 {
 		t.Fatal()
 	}
 
@@ -28,6 +28,18 @@ func TestRun(t *testing.T) {
 	}
 
 	if issues[2].Metric != "foo" && issues[0].Text != `counter metrics should have "_total" suffix` {
+		t.Fatal()
+	}
+
+	if issues[3].Metric != "foo_bar_total" && issues[0].Text != `non-counter metrics should not have "_total" suffix` {
+		t.Fatal()
+	}
+
+	if issues[4].Metric != "kube_test_metric_count" && issues[0].Text != `non-histogram and non-summary metrics should not have "_count" suffix` {
+		t.Fatal()
+	}
+
+	if issues[5].Metric != "test_histogram_duration_seconds" && issues[0].Text != `metric name should not include type 'histogram'` {
 		t.Fatal()
 	}
 }

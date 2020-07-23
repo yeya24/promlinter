@@ -14,9 +14,9 @@ import (
 )
 
 var (
-	metricsType     map[string]dto.MetricType
-	constMetricArgs map[string]int
-	validOptsFields map[string]bool
+	metricsType       map[string]dto.MetricType
+	constMetricArgNum map[string]int
+	validOptsFields   map[string]bool
 )
 
 func init() {
@@ -31,10 +31,11 @@ func init() {
 		"NewSummaryVec":   dto.MetricType_SUMMARY,
 	}
 
-	constMetricArgs = map[string]int{
+	constMetricArgNum = map[string]int{
 		"MustNewConstMetric": 3,
 		"MustNewHistogram":   4,
 		"MustNewSummary":     4,
+		"NewLazyConstMetric": 3,
 	}
 
 	// Doesn't contain ConstLabels since we don't need this field here.
@@ -226,13 +227,13 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 
 	switch stmt := call.Fun.(type) {
 	case *ast.Ident:
-		if requiredArgNum, ok = constMetricArgs[stmt.Name]; !ok {
+		if requiredArgNum, ok = constMetricArgNum[stmt.Name]; !ok {
 			return v
 		}
 		methodName = stmt.Name
 
 	case *ast.SelectorExpr:
-		if requiredArgNum, ok = constMetricArgs[stmt.Sel.Name]; !ok {
+		if requiredArgNum, ok = constMetricArgNum[stmt.Sel.Name]; !ok {
 			return v
 		}
 		methodName = stmt.Sel.Name
@@ -257,7 +258,7 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		Help: help,
 	}
 	switch methodName {
-	case "MustNewConstMetric":
+	case "MustNewConstMetric", "NewLazyConstMetric":
 		switch t := call.Args[1].(type) {
 		case *ast.Ident:
 			metric.Type = getConstMetricType(t.Name)
@@ -290,6 +291,9 @@ func (v *visitor) parseOptsExpr(n ast.Node) (*opt, *string) {
 				}
 			}
 		}
+
+	case *ast.UnaryExpr:
+		return v.parseOptsExpr(stmt.X)
 	}
 
 	return nil, nil
@@ -375,15 +379,61 @@ func (v *visitor) parseValue(object string, n ast.Node) (string, bool) {
 			return x + y, true
 		}
 
+	// We can only cover some basic cases here
+	case *ast.CallExpr:
+		return v.parseValueCallExpr(object, t)
+
 	default:
 		if v.strict {
 			v.issues = append(v.issues, Issue{
 				Pos:    v.fs.Position(n.Pos()),
 				Metric: "",
-				Text:   fmt.Sprintf("parsing field %s with type %T is not supported", object, t),
+				Text:   fmt.Sprintf("parsing %s with type %T is not supported", object, t),
 			})
 		}
 	}
+
+	return "", false
+}
+
+func (v *visitor) parseValueCallExpr(object string, call *ast.CallExpr) (string, bool) {
+	var (
+		methodName string
+		namespace  string
+		subsystem  string
+		name       string
+		ok         bool
+	)
+	switch expr := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		methodName = expr.Sel.Name
+	case *ast.Ident:
+		methodName = expr.Name
+	default:
+		return "", false
+	}
+
+	if methodName == "BuildFQName" && len(call.Args) == 3 {
+		namespace, ok = v.parseValue("namespace", call.Args[0])
+		if !ok {
+			return "", false
+		}
+		subsystem, ok = v.parseValue("subsystem", call.Args[1])
+		if !ok {
+			return "", false
+		}
+		name, ok = v.parseValue("name", call.Args[2])
+		if !ok {
+			return "", false
+		}
+		return prometheus.BuildFQName(namespace, subsystem, name), true
+	}
+
+	v.issues = append(v.issues, Issue{
+		Pos:    v.fs.Position(call.Pos()),
+		Metric: "",
+		Text:   fmt.Sprintf("parsing %s with Method Name %s is not supported", object, methodName),
+	})
 
 	return "", false
 }
@@ -429,11 +479,14 @@ func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
 		name string
 		ok   bool
 	)
-	if len(call.Args) != 4 && v.strict {
+
+	// k8s.io/component-base/metrics.NewDesc has 6 args
+	// while prometheus.NewDesc has 4 args
+	if len(call.Args) < 4 && v.strict {
 		v.issues = append(v.issues, Issue{
 			Pos:    v.fs.Position(call.Pos()),
 			Metric: "",
-			Text:   "NewDesc should have 4 args",
+			Text:   "NewDesc should have at least 4 args",
 		})
 		return nil, nil
 	}
