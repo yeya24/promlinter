@@ -5,9 +5,12 @@ package testdata
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"k8s.io/component-base/metrics"
 )
 
 func main() {
+	ch := make(chan<- prometheus.Metric)
+
 	// counter metric should have _total suffix
 	_ = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -61,6 +64,29 @@ func main() {
 			"name",
 		}, nil,
 	)
-	ch := make(chan<- prometheus.Metric)
 	ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, 1)
+
+	// support using BuildFQName to generate fqName here.
+	// bad metric, gauge shouldn't have _total
+	ch <- prometheus.MustNewConstMetric(prometheus.NewDesc(
+		prometheus.BuildFQName("foo", "bar", "total"),
+		"Number of expected replicas for the object.",
+		[]string{
+			"namespace",
+			"name",
+		}, nil), prometheus.GaugeValue, 1)
+
+	// support detecting kubernetes metrics
+	kubeMetricDesc := metrics.NewDesc(
+		"kube_test_metric_count",
+		"Gauge Help",
+		[]string{}, nil, metrics.STABLE, "",
+	)
+	ch <- metrics.NewLazyConstMetric(kubeMetricDesc, metrics.GaugeValue, 1)
+
+	// bad
+	_ = metrics.NewHistogram(&metrics.HistogramOpts{
+		Name: "test_histogram_duration_seconds",
+		Help: "",
+	})
 }
