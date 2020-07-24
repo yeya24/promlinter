@@ -18,7 +18,7 @@ const help = `Prometheus metrics linter for Go code.
 
 This tool can cover most of the patterns of metrics naming issues, but it cannot detect metric values that can only be determined in the runtime.
 
-By default it doesn' output parsing failures, if you want to see them, you can add --strict flag to enable it.
+By default it doesn't output parsing failures, if you want to see them, you can add --strict flag to enable it.
 
 It is also supported to disable the lint functions using repeated flag --disable. Current supported functions are:
 
