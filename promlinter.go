@@ -17,6 +17,8 @@ var (
 	metricsType       map[string]dto.MetricType
 	constMetricArgNum map[string]int
 	validOptsFields   map[string]bool
+	lintFuncText      map[string][]string
+	LintFuncNames     []string
 )
 
 func init() {
@@ -45,6 +47,25 @@ func init() {
 		"Subsystem": true,
 		"Help":      true,
 	}
+
+	lintFuncText = map[string][]string{
+		"Help":                     {"no help text"},
+		"MetricUnits":              {"use base unit"},
+		"Counter":                  {"counter metrics should"},
+		"HistogramSummaryReserved": {"non-histogram", "non-summary"},
+		"MetricTypeInName":         {"metric name should not include type"},
+		"ReservedChars":            {"metric names should not contain ':'"},
+		"CamelCase":                {"'snake_case' not 'camelCase'"},
+		"lintUnitAbbreviations":    {"metric names should not contain abbreviated units"},
+	}
+
+	LintFuncNames = []string{"Help", "MetricUnits", "Counter", "HistogramSummaryReserved",
+		"MetricTypeInName", "ReservedChars", "CamelCase", "lintUnitAbbreviations"}
+}
+
+type Setting struct {
+	Strict            bool
+	DisabledLintFuncs []string
 }
 
 // Issue contains metric name, error text and metric position.
@@ -67,12 +88,12 @@ type opt struct {
 	name      string
 }
 
-func Run(fs *token.FileSet, files []*ast.File, strict bool) []Issue {
+func Run(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 	v := &visitor{
 		fs:      fs,
 		metrics: make(map[*dto.MetricFamily]token.Position, 0),
 		issues:  make([]Issue, 0),
-		strict:  strict,
+		strict:  s.Strict,
 	}
 
 	for _, file := range files {
@@ -87,11 +108,21 @@ func Run(fs *token.FileSet, files []*ast.File, strict bool) []Issue {
 		}
 
 		for _, p := range problems {
+			for _, disabledFunc := range s.DisabledLintFuncs {
+				for _, pattern := range lintFuncText[disabledFunc] {
+					if strings.Contains(p.Text, pattern) {
+						goto END
+					}
+				}
+			}
+
 			v.issues = append(v.issues, Issue{
 				Pos:    v.metrics[metric],
 				Metric: p.Metric,
 				Text:   p.Text,
 			})
+
+		END:
 		}
 	}
 
