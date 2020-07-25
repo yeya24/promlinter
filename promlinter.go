@@ -464,7 +464,7 @@ func (v *visitor) parseValueCallExpr(object string, call *ast.CallExpr) (string,
 		v.issues = append(v.issues, Issue{
 			Pos:    v.fs.Position(call.Pos()),
 			Metric: "",
-			Text:   fmt.Sprintf("parsing %s with Method %s is not supported", object, methodName),
+			Text:   fmt.Sprintf("parsing %s with function %s is not supported", object, methodName),
 		})
 	}
 
@@ -495,11 +495,20 @@ func (v *visitor) parseConstMetricOptsExpr(n ast.Node) (*string, *string) {
 
 			if v.strict {
 				v.issues = append(v.issues, Issue{
-					Pos:    v.fs.Position(n.Pos()),
+					Pos:    v.fs.Position(stmt.Pos()),
 					Metric: "",
 					Text:   fmt.Sprintf("parsing desc of type %T is not supported", stmt.Obj.Decl),
 				})
 			}
+		}
+
+	default:
+		if v.strict {
+			v.issues = append(v.issues, Issue{
+				Pos:    v.fs.Position(stmt.Pos()),
+				Metric: "",
+				Text:   fmt.Sprintf("parsing desc of type %T is not supported", stmt),
+			})
 		}
 	}
 
@@ -512,6 +521,40 @@ func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
 		name string
 		ok   bool
 	)
+
+	switch expr := call.Fun.(type) {
+	case *ast.Ident:
+		if expr.Name != "NewDesc" {
+			if v.strict {
+				v.issues = append(v.issues, Issue{
+					Pos:    v.fs.Position(expr.Pos()),
+					Metric: "",
+					Text:   fmt.Sprintf("parsing desc with function %s is not supported", expr.Name),
+				})
+			}
+			return nil, nil
+		}
+	case *ast.SelectorExpr:
+		if expr.Sel.Name != "NewDesc" {
+			if v.strict {
+				v.issues = append(v.issues, Issue{
+					Pos:    v.fs.Position(expr.Sel.Pos()),
+					Metric: "",
+					Text:   fmt.Sprintf("parsing desc with function %s is not supported", expr.Sel.Name),
+				})
+			}
+			return nil, nil
+		}
+	default:
+		if v.strict {
+			v.issues = append(v.issues, Issue{
+				Pos:    v.fs.Position(expr.Pos()),
+				Metric: "",
+				Text:   fmt.Sprintf("parsing desc of %T is not supported", expr),
+			})
+		}
+		return nil, nil
+	}
 
 	// k8s.io/component-base/metrics.NewDesc has 6 args
 	// while prometheus.NewDesc has 4 args

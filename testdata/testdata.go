@@ -89,4 +89,19 @@ func main() {
 		Name: "test_histogram_duration_seconds",
 		Help: "",
 	})
+
+	// https://github.com/prometheus/mysqld_exporter/blob/master/collector/engine_innodb.go#L78-L82
+	// This is not supported because we cannot infer what newDesc is doing before runtime.
+	ch <- prometheus.MustNewConstMetric(
+		newDesc("innodb", "queries_inside_innodb", "Queries inside InnoDB."),
+		prometheus.GaugeValue,
+		1,
+	)
+}
+
+func newDesc(subsystem, name, help string) *prometheus.Desc {
+	return prometheus.NewDesc(
+		prometheus.BuildFQName("foo", subsystem, name),
+		help, nil, nil,
+	)
 }
