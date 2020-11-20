@@ -69,9 +69,15 @@ func main() {
 		}
 	}
 
+	var ec int
 	setting := promlinter.Setting{Strict: *strict, DisabledLintFuncs: *disableLintFuncs}
 	for _, iss := range promlinter.Run(fileSet, files, setting) {
+		ec++
 		fmt.Printf("%s %s %s\n", iss.Pos, iss.Metric, iss.Text)
+	}
+
+	if ec > 0 {
+		os.Exit(1)
 	}
 }
 
