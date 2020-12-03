@@ -269,7 +269,7 @@ func (v *visitor) parseKSMMetrics(nameArg ast.Node, helpArg ast.Node, metricType
 		if metricType, ok := metricsType[stmt.Sel.Name]; !ok {
 			return v
 		} else {
-			currentMetric.Type =  &metricType
+			currentMetric.Type = &metricType
 		}
 	}
 

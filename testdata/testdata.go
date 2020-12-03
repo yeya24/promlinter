@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	descDaemonSetLabelsName          = "kube_daemonset_labels"
-	descDaemonSetLabelsHelp          = "Kubernetes labels converted to Prometheus labels."
+	descDaemonSetLabelsName = "kube_daemonset_labels"
+	descDaemonSetLabelsHelp = "Kubernetes labels converted to Prometheus labels."
 
 	_ = []generator.FamilyGenerator{
 		*generator.NewFamilyGenerator(
@@ -93,7 +93,6 @@ var (
 		),
 	}
 )
-
 
 func main() {
 	ch := make(chan<- prometheus.Metric)
