@@ -23,8 +23,10 @@ var (
 
 func init() {
 	metricsType = map[string]dto.MetricType{
+		"Counter":         dto.MetricType_COUNTER,
 		"NewCounter":      dto.MetricType_COUNTER,
 		"NewCounterVec":   dto.MetricType_COUNTER,
+		"Gauge":           dto.MetricType_GAUGE,
 		"NewGauge":        dto.MetricType_GAUGE,
 		"NewGaugeVec":     dto.MetricType_GAUGE,
 		"NewHistogram":    dto.MetricType_HISTOGRAM,
@@ -198,6 +200,10 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 			return v.parseOpts(call.Args[0], dto.MetricType_GAUGE)
 		}
 
+		if stmt.Sel.Name == "NewFamilyGenerator" && len(call.Args) == 5 {
+			return v.parseKSMMetrics(call.Args[0], call.Args[1], call.Args[2])
+		}
+
 		if metricType, ok = metricsType[stmt.Sel.Name]; !ok {
 			return v
 		}
@@ -238,6 +244,34 @@ func (v *visitor) parseOpts(optArg ast.Node, metricType dto.MetricType) ast.Visi
 
 	metricName := prometheus.BuildFQName(opts.namespace, opts.subsystem, opts.name)
 	currentMetric.Name = &metricName
+
+	v.metrics[&currentMetric] = optsPosition
+	return v
+}
+
+func (v *visitor) parseKSMMetrics(nameArg ast.Node, helpArg ast.Node, metricTypeArg ast.Node) ast.Visitor {
+	optsPosition := v.fs.Position(nameArg.Pos())
+	currentMetric := dto.MetricFamily{}
+	name, ok := v.parseValue("name", nameArg)
+	if !ok {
+		return v
+	}
+	currentMetric.Name = &name
+
+	help, ok := v.parseValue("help", helpArg)
+	if !ok {
+		return v
+	}
+	currentMetric.Help = &help
+
+	switch stmt := metricTypeArg.(type) {
+	case *ast.SelectorExpr:
+		if metricType, ok := metricsType[stmt.Sel.Name]; !ok {
+			return v
+		} else {
+			currentMetric.Type =  &metricType
+		}
+	}
 
 	v.metrics[&currentMetric] = optsPosition
 	return v
