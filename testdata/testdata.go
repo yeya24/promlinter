@@ -12,86 +12,6 @@ import (
 var (
 	descDaemonSetLabelsName = "kube_daemonset_labels"
 	descDaemonSetLabelsHelp = "Kubernetes labels converted to Prometheus labels."
-
-	_ = []generator.FamilyGenerator{
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_created",
-			"Unix creation timestamp",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_current_number_scheduled",
-			"The number of nodes running at least one daemon pod and are supposed to.",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_desired_number_scheduled",
-			"The number of nodes that should be running the daemon pod.",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_number_available",
-			"The number of nodes that should be running the daemon pod and have one or more of the daemon pod running and available",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_number_misscheduled",
-			"The number of nodes running a daemon pod but are not supposed to.",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_number_ready",
-			"The number of nodes that should be running the daemon pod and have one or more of the daemon pod running and ready.",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_number_unavailable",
-			"The number of nodes that should be running the daemon pod and have none of the daemon pod running and available",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_observed_generation",
-			"The most recent generation observed by the daemon set controller.",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_status_updated_number_scheduled",
-			"The total number of nodes that are running updated daemon pod",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			"kube_daemonset_metadata_generation",
-			"Sequence number representing a specific generation of the desired state.",
-			metric.Gauge,
-			"",
-			nil,
-		),
-		*generator.NewFamilyGenerator(
-			descDaemonSetLabelsName,
-			descDaemonSetLabelsHelp,
-			metric.Gauge,
-			"",
-			nil,
-		),
-	}
 )
 
 func main() {
@@ -183,6 +103,25 @@ func main() {
 		prometheus.GaugeValue,
 		1,
 	)
+
+	// metrics for kube-state-metrics
+	_ = []generator.FamilyGenerator{
+		// good
+		*generator.NewFamilyGenerator(
+			"kube_daemonset_created",
+			"foo",
+			metric.Gauge,
+			"",
+			nil,
+		),
+		*generator.NewFamilyGenerator(
+			descDaemonSetLabelsName,
+			descDaemonSetLabelsHelp,
+			metric.Counter,
+			"",
+			nil,
+		),
+	}
 }
 
 func newDesc(subsystem, name, help string) *prometheus.Desc {

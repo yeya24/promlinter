@@ -249,6 +249,7 @@ func (v *visitor) parseOpts(optArg ast.Node, metricType dto.MetricType) ast.Visi
 	return v
 }
 
+// Parser for kube-state-metrics generators.
 func (v *visitor) parseKSMMetrics(nameArg ast.Node, helpArg ast.Node, metricTypeArg ast.Node) ast.Visitor {
 	optsPosition := v.fs.Position(nameArg.Pos())
 	currentMetric := dto.MetricFamily{}
