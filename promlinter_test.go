@@ -23,7 +23,6 @@ func TestRun(t *testing.T) {
 		t.Fatal()
 	}
 
-
 	if issues[1].Metric != "test_metric_name" && issues[1].Text != `counter metrics should have "_total" suffix` {
 		t.Fatal()
 	}
