@@ -5,7 +5,13 @@ package testdata
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"k8s.io/component-base/metrics"
+	"k8s.io/kube-state-metrics/v2/pkg/metric"
+	generator "k8s.io/kube-state-metrics/v2/pkg/metric_generator"
+)
+
+var (
+	descDaemonSetLabelsName = "kube_daemonset_labels"
+	descDaemonSetLabelsHelp = "Kubernetes labels converted to Prometheus labels."
 )
 
 func main() {
@@ -97,6 +103,25 @@ func main() {
 		prometheus.GaugeValue,
 		1,
 	)
+
+	// metrics for kube-state-metrics
+	_ = []generator.FamilyGenerator{
+		// good
+		*generator.NewFamilyGenerator(
+			"kube_daemonset_created",
+			"foo",
+			metric.Gauge,
+			"",
+			nil,
+		),
+		*generator.NewFamilyGenerator(
+			descDaemonSetLabelsName,
+			descDaemonSetLabelsHelp,
+			metric.Counter,
+			"",
+			nil,
+		),
+	}
 }
 
 func newDesc(subsystem, name, help string) *prometheus.Desc {
