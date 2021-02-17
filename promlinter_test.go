@@ -14,7 +14,7 @@ func TestRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues := Run(fs, []*ast.File{file}, Setting{Strict: false, DisabledLintFuncs: nil})
+	issues := RunLint(fs, []*ast.File{file}, Setting{Strict: false, DisabledLintFuncs: nil})
 	if len(issues) != 7 {
 		t.Fatal()
 	}
