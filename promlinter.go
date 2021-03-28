@@ -266,6 +266,12 @@ func (v *visitor) parseOpts(optArg ast.Node, metricType dto.MetricType) ast.Visi
 	}
 
 	metricName := prometheus.BuildFQName(opts.namespace, opts.subsystem, opts.name)
+	// We skip the invalid metric if the name is an empty string.
+	// This kind of metric declaration might be used as a stud metric
+	// https://github.com/thanos-io/thanos/blob/main/cmd/thanos/tools_bucket.go#L538.
+	if metricName == "" {
+		return v
+	}
 	currentMetric.Name = &metricName
 
 	v.metrics = append(v.metrics, MetricFamilyWithPos{MetricFamily: &currentMetric, Pos: optsPosition})

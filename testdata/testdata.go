@@ -3,6 +3,7 @@
 package testdata
 
 import (
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"k8s.io/kube-state-metrics/v2/pkg/metric"
@@ -122,6 +123,10 @@ func main() {
 			nil,
 		),
 	}
+
+	// We skip linting these case when metric name is not set.
+	promauto.With(nil).NewCounter(prometheus.CounterOpts{})
+	promauto.With(nil).NewCounterVec(prometheus.CounterOpts{}, nil)
 }
 
 func newDesc(subsystem, name, help string) *prometheus.Desc {
