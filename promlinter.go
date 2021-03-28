@@ -72,14 +72,19 @@ type Setting struct {
 
 // Issue contains metric name, error text and metric position.
 type Issue struct {
-	Pos    token.Position
-	Metric string
 	Text   string
+	Metric string
+	Pos    token.Position
+}
+
+type MetricFamilyWithPos struct {
+	MetricFamily *dto.MetricFamily
+	Pos          token.Position
 }
 
 type visitor struct {
 	fs      *token.FileSet
-	metrics map[*dto.MetricFamily]token.Position
+	metrics []MetricFamilyWithPos
 	issues  []Issue
 	strict  bool
 }
@@ -90,10 +95,28 @@ type opt struct {
 	name      string
 }
 
-func Run(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
+func RunList(fs *token.FileSet, files []*ast.File, strict bool) []MetricFamilyWithPos {
 	v := &visitor{
 		fs:      fs,
-		metrics: make(map[*dto.MetricFamily]token.Position, 0),
+		metrics: make([]MetricFamilyWithPos, 0),
+		issues:  make([]Issue, 0),
+		strict:  strict,
+	}
+
+	for _, file := range files {
+		ast.Walk(v, file)
+	}
+
+	sort.Slice(v.metrics, func(i, j int) bool {
+		return v.metrics[i].Pos.String() < v.metrics[j].Pos.String()
+	})
+	return v.metrics
+}
+
+func RunLint(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
+	v := &visitor{
+		fs:      fs,
+		metrics: make([]MetricFamilyWithPos, 0),
 		issues:  make([]Issue, 0),
 		strict:  s.Strict,
 	}
@@ -103,8 +126,8 @@ func Run(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 	}
 
 	// lint metrics
-	for metric := range v.metrics {
-		problems, err := promlint.NewWithMetricFamilies([]*dto.MetricFamily{metric}).Lint()
+	for _, mfp := range v.metrics {
+		problems, err := promlint.NewWithMetricFamilies([]*dto.MetricFamily{mfp.MetricFamily}).Lint()
 		if err != nil {
 			panic(err)
 		}
@@ -119,7 +142,7 @@ func Run(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 			}
 
 			v.issues = append(v.issues, Issue{
-				Pos:    v.metrics[metric],
+				Pos:    mfp.Pos,
 				Metric: p.Metric,
 				Text:   p.Text,
 			})
@@ -245,7 +268,7 @@ func (v *visitor) parseOpts(optArg ast.Node, metricType dto.MetricType) ast.Visi
 	metricName := prometheus.BuildFQName(opts.namespace, opts.subsystem, opts.name)
 	currentMetric.Name = &metricName
 
-	v.metrics[&currentMetric] = optsPosition
+	v.metrics = append(v.metrics, MetricFamilyWithPos{MetricFamily: &currentMetric, Pos: optsPosition})
 	return v
 }
 
@@ -274,7 +297,7 @@ func (v *visitor) parseKSMMetrics(nameArg ast.Node, helpArg ast.Node, metricType
 		}
 	}
 
-	v.metrics[&currentMetric] = optsPosition
+	v.metrics = append(v.metrics, MetricFamilyWithPos{MetricFamily: &currentMetric, Pos: optsPosition})
 	return v
 }
 
@@ -307,8 +330,8 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 
 	if len(call.Args) < requiredArgNum && v.strict {
 		v.issues = append(v.issues, Issue{
-			Pos:    v.fs.Position(call.Pos()),
 			Metric: "",
+			Pos:    v.fs.Position(call.Pos()),
 			Text:   fmt.Sprintf("%s should have at least %d arguments", methodName, requiredArgNum),
 		})
 		return v
@@ -340,7 +363,7 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		metric.Type = &metricType
 	}
 
-	v.metrics[metric] = v.fs.Position(call.Pos())
+	v.metrics = append(v.metrics, MetricFamilyWithPos{MetricFamily: metric, Pos: v.fs.Position(call.Pos())})
 	return v
 }
 
@@ -497,8 +520,8 @@ func (v *visitor) parseValueCallExpr(object string, call *ast.CallExpr) (string,
 
 	if v.strict {
 		v.issues = append(v.issues, Issue{
-			Pos:    v.fs.Position(call.Pos()),
 			Metric: "",
+			Pos:    v.fs.Position(call.Pos()),
 			Text:   fmt.Sprintf("parsing %s with function %s is not supported", object, methodName),
 		})
 	}
@@ -595,8 +618,8 @@ func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
 	// while prometheus.NewDesc has 4 args
 	if len(call.Args) < 4 && v.strict {
 		v.issues = append(v.issues, Issue{
-			Pos:    v.fs.Position(call.Pos()),
 			Metric: "",
+			Pos:    v.fs.Position(call.Pos()),
 			Text:   "NewDesc should have at least 4 args",
 		})
 		return nil, nil
