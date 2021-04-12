@@ -2,8 +2,6 @@
 
 A linter for checking Prometheus metrics name via promlint.
 
-Sorry Loki :(.
-
 ![usage](assets/promlinter.gif)
 
 ## Installation
