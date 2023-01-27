@@ -1,15 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"gopkg.in/alecthomas/kingpin.v2"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+
+	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/yeya24/promlinter"
 )
@@ -58,6 +60,7 @@ func main() {
 		Default("false").Short('s').Bool()
 	listPrintAddPos := listCmd.Flag("add-position", "Add metric position column when printing the result.").Default("false").Bool()
 	listPrintAddHelp := listCmd.Flag("add-help", "Add metric help column when printing the result.").Default("false").Bool()
+	listPrintJSON := listCmd.Flag("json", "Print result as json.").Default("false").Bool()
 
 	lintCmd := app.Command("lint", "Lint metrics via promlint.")
 	lintPaths := lintCmd.Arg("files", "Files to parse metrics.").Strings()
@@ -74,7 +77,7 @@ func main() {
 	switch parsedCmd {
 	case listCmd.FullCommand():
 		metrics := promlinter.RunList(fileSet, findFiles(*listPaths, fileSet), *listStrict)
-		printMetrics(metrics, *listPrintAddPos, *listPrintAddHelp)
+		printMetrics(metrics, *listPrintAddPos, *listPrintAddHelp, *listPrintJSON)
 	case lintCmd.FullCommand():
 		setting := promlinter.Setting{Strict: *lintStrict, DisabledLintFuncs: *disableLintFuncs}
 		for _, iss := range promlinter.RunLint(fileSet, findFiles(*lintPaths, fileSet), setting) {
@@ -127,7 +130,11 @@ func walkDir(root string) chan string {
 	return out
 }
 
-func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp bool) {
+func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp, asJson bool) {
+	if asJson {
+		printAsJson(metrics)
+		return
+	}
 	tw := tabwriter.NewWriter(os.Stdout, 20, 1, 3, ' ', 0)
 	defer tw.Flush()
 
@@ -155,4 +162,39 @@ func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp
 			fmt.Fprintf(tw, "%v\t%v\n", MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name)
 		}
 	}
+}
+
+func printAsJson(metrics []promlinter.MetricFamilyWithPos) {
+
+	b, err := json.Marshal(toPrint(metrics))
+	if err != nil {
+		fmt.Printf("Failed: %v", err)
+		os.Exit(1)
+	}
+	fmt.Print(string(b))
+}
+
+type MetricForPrinting struct {
+	Name     string
+	Help     string
+	Type     string
+	Filename string
+	Line     int
+	Column   int
+}
+
+func toPrint(metrics []promlinter.MetricFamilyWithPos) []MetricForPrinting {
+	p := []MetricForPrinting{}
+	for _, m := range metrics {
+		i := MetricForPrinting{
+			Name:     *m.MetricFamily.Name,
+			Help:     *m.MetricFamily.Help,
+			Type:     MetricType[int32(*m.MetricFamily.Type)],
+			Filename: m.Pos.Filename,
+			Line:     m.Pos.Line,
+			Column:   m.Pos.Column,
+		}
+		p = append(p, i)
+	}
+	return p
 }
