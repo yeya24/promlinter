@@ -186,15 +186,29 @@ type MetricForPrinting struct {
 func toPrint(metrics []promlinter.MetricFamilyWithPos) []MetricForPrinting {
 	p := []MetricForPrinting{}
 	for _, m := range metrics {
-		i := MetricForPrinting{
-			Name:     *m.MetricFamily.Name,
-			Help:     *m.MetricFamily.Help,
-			Type:     MetricType[int32(*m.MetricFamily.Type)],
-			Filename: m.Pos.Filename,
-			Line:     m.Pos.Line,
-			Column:   m.Pos.Column,
+		if m.MetricFamily != nil && *m.MetricFamily.Name != "" {
+			if m.MetricFamily.Type == nil {
+				continue
+			}
+			n := ""
+			h := ""
+
+			if m.MetricFamily.Name != nil {
+				n = *m.MetricFamily.Name
+			}
+			if m.MetricFamily.Help != nil {
+				h = *m.MetricFamily.Help
+			}
+			i := MetricForPrinting{
+				Name:     n,
+				Help:     h,
+				Type:     MetricType[int32(*m.MetricFamily.Type)],
+				Filename: m.Pos.Filename,
+				Line:     m.Pos.Line,
+				Column:   m.Pos.Column,
+			}
+			p = append(p, i)
 		}
-		p = append(p, i)
 	}
 	return p
 }
