@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 
 	"gopkg.in/alecthomas/kingpin.v2"
+	"gopkg.in/yaml.v2"
 
 	"github.com/yeya24/promlinter"
 )
@@ -60,7 +61,7 @@ func main() {
 		Default("false").Short('s').Bool()
 	listPrintAddPos := listCmd.Flag("add-position", "Add metric position column when printing the result.").Default("false").Bool()
 	listPrintAddHelp := listCmd.Flag("add-help", "Add metric help column when printing the result.").Default("false").Bool()
-	listPrintJSON := listCmd.Flag("json", "Print result as json.").Default("false").Bool()
+	listPrintFormat := listCmd.Flag("output", "Print result formatted as JSON/YAML").Short('o').Enum("yaml", "json")
 
 	lintCmd := app.Command("lint", "Lint metrics via promlint.")
 	lintPaths := lintCmd.Arg("files", "Files to parse metrics.").Strings()
@@ -77,7 +78,7 @@ func main() {
 	switch parsedCmd {
 	case listCmd.FullCommand():
 		metrics := promlinter.RunList(fileSet, findFiles(*listPaths, fileSet), *listStrict)
-		printMetrics(metrics, *listPrintAddPos, *listPrintAddHelp, *listPrintJSON)
+		printMetrics(metrics, *listPrintAddPos, *listPrintAddHelp, *listPrintFormat)
 	case lintCmd.FullCommand():
 		setting := promlinter.Setting{Strict: *lintStrict, DisabledLintFuncs: *disableLintFuncs}
 		for _, iss := range promlinter.RunLint(fileSet, findFiles(*lintPaths, fileSet), setting) {
@@ -130,10 +131,16 @@ func walkDir(root string) chan string {
 	return out
 }
 
-func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp, asJson bool) {
-	if asJson {
-		printAsJson(metrics)
-		return
+func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp bool, printFormat string) {
+	if len(printFormat) > 0 {
+		if printFormat == "json" {
+			printAsJson(metrics)
+			return
+		}
+		if printFormat == "yaml" {
+			printAsYaml(metrics)
+			return
+		}
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 20, 1, 3, ' ', 0)
 	defer tw.Flush()
@@ -164,8 +171,17 @@ func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp
 	}
 }
 
-func printAsJson(metrics []promlinter.MetricFamilyWithPos) {
+func printAsYaml(metrics []promlinter.MetricFamilyWithPos) {
+	b, err := yaml.Marshal(toPrint(metrics))
+	if err != nil {
+		fmt.Printf("Failed: %v", err)
+		os.Exit(1)
+	}
+	fmt.Print(string(b))
 
+}
+
+func printAsJson(metrics []promlinter.MetricFamilyWithPos) {
 	b, err := json.Marshal(toPrint(metrics))
 	if err != nil {
 		fmt.Printf("Failed: %v", err)
