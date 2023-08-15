@@ -42,13 +42,16 @@ It is also supported to disable the lint functions using repeated flag --disable
 	[UnitAbbreviations]: UnitAbbreviations detects abbreviated units in the metric name.
 `
 
-var MetricType = map[int32]string{
-	0: "COUNTER",
-	1: "GAUGE",
-	2: "SUMMARY",
-	3: "UNTYPED",
-	4: "HISTOGRAM",
-}
+var (
+	MetricType = map[int32]string{
+		0: "COUNTER",
+		1: "GAUGE",
+		2: "SUMMARY",
+		3: "UNTYPED",
+		4: "HISTOGRAM",
+	}
+	withVendor *bool
+)
 
 func main() {
 	app := kingpin.New(filepath.Base(os.Args[0]), help)
@@ -62,6 +65,8 @@ func main() {
 	listPrintAddPos := listCmd.Flag("add-position", "Add metric position column when printing the result.").Default("false").Bool()
 	listPrintAddHelp := listCmd.Flag("add-help", "Add metric help column when printing the result.").Default("false").Bool()
 	listPrintFormat := listCmd.Flag("output", "Print result formatted as JSON/YAML").Short('o').Enum("yaml", "json")
+
+	withVendor = listCmd.Flag("with-vendor", "Scan vendor packages.").Default("false").Bool()
 
 	lintCmd := app.Command("lint", "Lint metrics via promlint.")
 	lintPaths := lintCmd.Arg("files", "Files to parse metrics.").Strings()
@@ -114,9 +119,11 @@ func walkDir(root string) chan string {
 		defer close(out)
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			sep := string(filepath.Separator)
-			if strings.HasPrefix(path, "vendor"+sep) || strings.Contains(path, sep+"vendor"+sep) {
+			if !*withVendor &&
+				(strings.HasPrefix(path, "vendor"+sep) || strings.Contains(path, sep+"vendor"+sep)) {
 				return nil
 			}
+
 			if !info.IsDir() && !strings.HasSuffix(info.Name(), "_test.go") &&
 				strings.HasSuffix(info.Name(), ".go") {
 				out <- path
@@ -147,9 +154,9 @@ func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp
 
 	var header string
 	if addPosition {
-		header = "POSITION\tTYPE\tNAME"
+		header = "POSITION\tTYPE\tNAME\tLABLES"
 	} else {
-		header = "TYPE\tNAME"
+		header = "TYPE\tNAME\tLABLES"
 	}
 
 	if addHelp {
@@ -159,14 +166,49 @@ func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp
 	fmt.Fprintln(tw, header)
 
 	for _, m := range metrics {
+
+		help := "N/A"
+		if m.MetricFamily.Help != nil {
+			help = *m.MetricFamily.Help
+		}
+
+		labels := "N/A"
+
+		if len(m.MetricFamily.Metric) > 0 {
+			var arr []string
+			for _, label := range m.MetricFamily.Metric[0].Label {
+				arr = append(arr, strings.Trim(*label.Name, `"`))
+			}
+			labels = strings.Join(arr, ",")
+		}
+
 		if addPosition && addHelp {
-			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\n", m.Pos, MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name, *m.MetricFamily.Help)
+			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\t%v\n",
+				m.Pos,
+				MetricType[int32(*m.MetricFamily.Type)],
+				*m.MetricFamily.Name,
+				labels,
+				help)
 		} else if addPosition {
-			fmt.Fprintf(tw, "%v\t%v\t%v\n", m.Pos, MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name)
+			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\n",
+				m.Pos,
+				MetricType[int32(*m.MetricFamily.Type)],
+				*m.MetricFamily.Name,
+				labels,
+			)
 		} else if addHelp {
-			fmt.Fprintf(tw, "%v\t%v\t%v\n", MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name, *m.MetricFamily.Help)
+			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\n",
+				MetricType[int32(*m.MetricFamily.Type)],
+				*m.MetricFamily.Name,
+				labels,
+				help)
 		} else {
-			fmt.Fprintf(tw, "%v\t%v\n", MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name)
+			fmt.Fprintf(tw,
+				"%v\t%v\t%v\n",
+				MetricType[int32(*m.MetricFamily.Type)],
+				*m.MetricFamily.Name,
+				labels,
+			)
 		}
 	}
 }
@@ -182,7 +224,7 @@ func printAsYaml(metrics []promlinter.MetricFamilyWithPos) {
 }
 
 func printAsJson(metrics []promlinter.MetricFamilyWithPos) {
-	b, err := json.Marshal(toPrint(metrics))
+	b, err := json.MarshalIndent(toPrint(metrics), "", "  ")
 	if err != nil {
 		fmt.Printf("Failed: %v", err)
 		os.Exit(1)
@@ -195,6 +237,7 @@ type MetricForPrinting struct {
 	Help     string
 	Type     string
 	Filename string
+	Labels   []string
 	Line     int
 	Column   int
 }
@@ -215,6 +258,16 @@ func toPrint(metrics []promlinter.MetricFamilyWithPos) []MetricForPrinting {
 			if m.MetricFamily.Help != nil {
 				h = *m.MetricFamily.Help
 			}
+
+			var labels []string
+			for _, m := range m.MetricFamily.Metric {
+				for idx, _ := range m.Label {
+					if m.Label[idx].Name != nil {
+						labels = append(labels, strings.Trim(*m.Label[idx].Name, `"`))
+					}
+				}
+			}
+
 			i := MetricForPrinting{
 				Name:     n,
 				Help:     h,
@@ -222,6 +275,7 @@ func toPrint(metrics []promlinter.MetricFamilyWithPos) []MetricForPrinting {
 				Filename: m.Pos.Filename,
 				Line:     m.Pos.Line,
 				Column:   m.Pos.Column,
+				Labels:   labels,
 			}
 			p = append(p, i)
 		}

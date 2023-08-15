@@ -93,6 +93,7 @@ type opt struct {
 	namespace string
 	subsystem string
 	name      string
+	labels    []string
 }
 
 func RunList(fs *token.FileSet, files []*ast.File, strict bool) []MetricFamilyWithPos {
@@ -168,6 +169,8 @@ func (v *visitor) Visit(n ast.Node) ast.Visitor {
 
 	case *ast.SendStmt:
 		return v.parseSendMetricChanExpr(t)
+
+	default:
 	}
 
 	return v
@@ -190,16 +193,17 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 	*/
 	case *ast.Ident:
 		if stmt.Name == "NewCounterFunc" {
-			return v.parseOpts(call.Args[0], dto.MetricType_COUNTER)
+			return v.parseOpts(call.Args, dto.MetricType_COUNTER)
 		}
 
 		if stmt.Name == "NewGaugeFunc" {
-			return v.parseOpts(call.Args[0], dto.MetricType_GAUGE)
+			return v.parseOpts(call.Args, dto.MetricType_GAUGE)
 		}
 
 		if metricType, ok = metricsType[stmt.Name]; !ok {
 			return v
 		}
+
 		methodName = stmt.Name
 
 	/*
@@ -216,11 +220,11 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 	*/
 	case *ast.SelectorExpr:
 		if stmt.Sel.Name == "NewCounterFunc" {
-			return v.parseOpts(call.Args[0], dto.MetricType_COUNTER)
+			return v.parseOpts(call.Args, dto.MetricType_COUNTER)
 		}
 
 		if stmt.Sel.Name == "NewGaugeFunc" {
-			return v.parseOpts(call.Args[0], dto.MetricType_GAUGE)
+			return v.parseOpts(call.Args, dto.MetricType_GAUGE)
 		}
 
 		if stmt.Sel.Name == "NewFamilyGenerator" && len(call.Args) == 5 {
@@ -230,6 +234,7 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 		if metricType, ok = metricsType[stmt.Sel.Name]; !ok {
 			return v
 		}
+
 		methodName = stmt.Sel.Name
 
 	default:
@@ -254,19 +259,39 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 		return v
 	}
 
-	return v.parseOpts(call.Args[0], metricType)
+	return v.parseOpts(call.Args, metricType)
 }
 
-func (v *visitor) parseOpts(optArg ast.Node, metricType dto.MetricType) ast.Visitor {
+func (v *visitor) parseOpts(optArgs []ast.Expr, metricType dto.MetricType) ast.Visitor {
 	// position for the first arg of the CallExpr
-	optsPosition := v.fs.Position(optArg.Pos())
-	opts, help := v.parseOptsExpr(optArg)
+	optsPosition := v.fs.Position(optArgs[0].Pos())
+	opts, help := v.parseOptsExpr(optArgs[0])
+
+	var metric *dto.Metric
+	if len(optArgs) > 1 {
+		// parse labels
+		if labelOpts, _ := v.parseOptsExpr(optArgs[1]); labelOpts != nil && len(labelOpts.labels) > 0 {
+			metric = &dto.Metric{}
+			for idx, _ := range labelOpts.labels {
+				metric.Label = append(metric.Label,
+					&dto.LabelPair{
+						Name: &labelOpts.labels[idx],
+					})
+			}
+		}
+	}
+
 	if opts == nil {
 		return v
 	}
+
 	currentMetric := dto.MetricFamily{
 		Type: &metricType,
 		Help: help,
+	}
+
+	if metric != nil {
+		currentMetric.Metric = append(currentMetric.Metric, metric)
 	}
 
 	metricName := prometheus.BuildFQName(opts.namespace, opts.subsystem, opts.name)
@@ -401,7 +426,14 @@ func (v *visitor) parseOptsExpr(n ast.Node) (*opt, *string) {
 func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) (*opt, *string) {
 	metricOption := &opt{}
 	var help *string
+
 	for _, elt := range stmt.Elts {
+
+		label, ok := elt.(*ast.BasicLit)
+		if ok {
+			metricOption.labels = append(metricOption.labels, label.Value)
+		}
+
 		kvExpr, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
 			continue
