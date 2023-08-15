@@ -154,9 +154,9 @@ func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp
 
 	var header string
 	if addPosition {
-		header = "POSITION\tTYPE\tNAME\tLABLES"
+		header = "POSITION\tTYPE\tNAME\tLABELS"
 	} else {
-		header = "TYPE\tNAME\tLABLES"
+		header = "TYPE\tNAME\tLABELS"
 	}
 
 	if addHelp {
