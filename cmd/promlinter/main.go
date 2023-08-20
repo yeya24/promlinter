@@ -64,7 +64,7 @@ func main() {
 		Default("false").Short('s').Bool()
 	listPrintAddPos := listCmd.Flag("add-position", "Add metric position column when printing the result.").Default("false").Bool()
 	listPrintAddHelp := listCmd.Flag("add-help", "Add metric help column when printing the result.").Default("false").Bool()
-	listPrintFormat := listCmd.Flag("output", "Print result formatted as JSON/YAML").Short('o').Enum("yaml", "json")
+	listPrintFormat := listCmd.Flag("output", "Print result formatted as JSON/YAML/Markdown").Short('o').Enum("yaml", "json", "md")
 
 	withVendor = listCmd.Flag("with-vendor", "Scan vendor packages.").Default("false").Bool()
 
@@ -83,7 +83,14 @@ func main() {
 	switch parsedCmd {
 	case listCmd.FullCommand():
 		metrics := promlinter.RunList(fileSet, findFiles(*listPaths, fileSet), *listStrict)
-		printMetrics(metrics, *listPrintAddPos, *listPrintAddHelp, *listPrintFormat)
+		p := printer{
+			fmt:         *listPrintFormat,
+			addHelp:     *listPrintAddHelp,
+			addPosition: *listPrintAddPos,
+			metrics:     metrics,
+		}
+
+		p.printMetrics()
 	case lintCmd.FullCommand():
 		setting := promlinter.Setting{Strict: *lintStrict, DisabledLintFuncs: *disableLintFuncs}
 		for _, iss := range promlinter.RunLint(fileSet, findFiles(*lintPaths, fileSet), setting) {
@@ -119,7 +126,7 @@ func walkDir(root string) chan string {
 		defer close(out)
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			sep := string(filepath.Separator)
-			if !*withVendor &&
+			if withVendor != nil && !*withVendor &&
 				(strings.HasPrefix(path, "vendor"+sep) || strings.Contains(path, sep+"vendor"+sep)) {
 				return nil
 			}
@@ -138,83 +145,124 @@ func walkDir(root string) chan string {
 	return out
 }
 
-func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp bool, printFormat string) {
-	if len(printFormat) > 0 {
-		if printFormat == "json" {
-			printAsJson(metrics)
-			return
-		}
-		if printFormat == "yaml" {
-			printAsYaml(metrics)
-			return
-		}
-	}
+func (p *printer) printDefault() {
 	tw := tabwriter.NewWriter(os.Stdout, 20, 1, 3, ' ', 0)
 	defer tw.Flush()
 
-	var header string
-	if addPosition {
-		header = "POSITION\tTYPE\tNAME\tLABELS"
+	fieldSep := "\t"
+	if p.fmt == "md" {
+		fieldSep = "|"
+	}
+
+	var (
+		fields []string
+	)
+
+	if p.addPosition {
+		fields = []string{
+			"POSITION", "TYPE", "NAME", "LABELS",
+		}
 	} else {
-		header = "TYPE\tNAME\tLABELS"
+		fields = []string{
+			"TYPE", "NAME", "LABELS",
+		}
 	}
 
-	if addHelp {
-		header += "\tHELP"
+	if p.addHelp {
+		fields = append(fields, "HELP")
 	}
 
-	fmt.Fprintln(tw, header)
+	if p.fmt == "md" {
+		fmt.Fprintf(tw, "|%s|\n", strings.Join(fields, fieldSep))
+	} else {
+		fmt.Fprintf(tw, "%s\n", strings.Join(fields, fieldSep))
+	}
 
-	for _, m := range metrics {
+	if p.fmt == "md" {
+		fmt.Fprintf(tw, "%s|\n", strings.Repeat("|---", len(fields)))
+	}
+
+	for _, m := range p.metrics {
 
 		help := "N/A"
 		if m.MetricFamily.Help != nil {
 			help = *m.MetricFamily.Help
 		}
 
-		labels := "N/A"
-
-		if len(m.MetricFamily.Metric) > 0 {
-			var arr []string
-			for _, label := range m.MetricFamily.Metric[0].Label {
-				arr = append(arr, strings.Trim(*label.Name, `"`))
-			}
-			labels = strings.Join(arr, ",")
+		labels := strings.Join(m.Labels(), ",")
+		if labels == "" {
+			labels = "N/A"
 		}
 
-		if addPosition && addHelp {
-			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\t%v\n",
-				m.Pos,
+		var lineArr []string
+
+		mname := *m.MetricFamily.Name
+		if p.fmt == "md" {
+			mname = fmt.Sprintf("`%s`", *m.MetricFamily.Name)
+			labels = fmt.Sprintf("`%s`", labels)
+		}
+
+		if p.addPosition && p.addHelp {
+			lineArr = []string{
+				m.Pos.String(),
 				MetricType[int32(*m.MetricFamily.Type)],
-				*m.MetricFamily.Name,
+				mname,
 				labels,
-				help)
-		} else if addPosition {
-			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\n",
-				m.Pos,
+				help,
+			}
+		} else if p.addPosition {
+			lineArr = []string{
+				m.Pos.String(),
 				MetricType[int32(*m.MetricFamily.Type)],
-				*m.MetricFamily.Name,
+				mname,
 				labels,
-			)
-		} else if addHelp {
-			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\n",
+			}
+
+		} else if p.addHelp {
+			lineArr = []string{
 				MetricType[int32(*m.MetricFamily.Type)],
-				*m.MetricFamily.Name,
+				mname,
 				labels,
-				help)
+				help,
+			}
 		} else {
-			fmt.Fprintf(tw,
-				"%v\t%v\t%v\n",
+			lineArr = []string{
 				MetricType[int32(*m.MetricFamily.Type)],
-				*m.MetricFamily.Name,
+				mname,
 				labels,
-			)
+			}
+		}
+
+		if p.fmt == "md" {
+			fmt.Fprintf(tw, "|%s|\n", strings.Join(lineArr, fieldSep))
+		} else {
+			fmt.Fprintf(tw, "%s\n", strings.Join(lineArr, fieldSep))
 		}
 	}
 }
 
-func printAsYaml(metrics []promlinter.MetricFamilyWithPos) {
-	b, err := yaml.Marshal(toPrint(metrics))
+type printer struct {
+	fmt                  string
+	addHelp, addPosition bool
+	metrics              []promlinter.MetricFamilyWithPos
+}
+
+func (p *printer) printMetrics() {
+	switch p.fmt {
+	case "json":
+		p.printAsJson()
+		return
+	case "yaml":
+		p.printAsYaml()
+		return
+	default:
+		p.printDefault()
+		return
+	}
+}
+
+func (p *printer) printAsYaml() {
+	b, err := yaml.Marshal(toPrint(p.metrics))
 	if err != nil {
 		fmt.Printf("Failed: %v", err)
 		os.Exit(1)
@@ -223,8 +271,8 @@ func printAsYaml(metrics []promlinter.MetricFamilyWithPos) {
 
 }
 
-func printAsJson(metrics []promlinter.MetricFamilyWithPos) {
-	b, err := json.MarshalIndent(toPrint(metrics), "", "  ")
+func (p *printer) printAsJson() {
+	b, err := json.MarshalIndent(toPrint(p.metrics), "", "  ")
 	if err != nil {
 		fmt.Printf("Failed: %v", err)
 		os.Exit(1)

@@ -82,6 +82,16 @@ type MetricFamilyWithPos struct {
 	Pos          token.Position
 }
 
+func (m *MetricFamilyWithPos) Labels() []string {
+	var arr []string
+	if len(m.MetricFamily.Metric) > 0 {
+		for _, label := range m.MetricFamily.Metric[0].Label {
+			arr = append(arr, strings.Trim(*label.Name, `"`))
+		}
+	}
+	return arr
+}
+
 type visitor struct {
 	fs      *token.FileSet
 	metrics []MetricFamilyWithPos
@@ -174,6 +184,16 @@ func (v *visitor) Visit(n ast.Node) ast.Visitor {
 	}
 
 	return v
+}
+
+func (v *visitor) addMetric(mfp *MetricFamilyWithPos) {
+	for _, m := range v.metrics {
+		if mfp.MetricFamily.String() == m.MetricFamily.String() {
+			return
+		}
+	}
+
+	v.metrics = append(v.metrics, *mfp)
 }
 
 func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
@@ -303,7 +323,7 @@ func (v *visitor) parseOpts(optArgs []ast.Expr, metricType dto.MetricType) ast.V
 	}
 	currentMetric.Name = &metricName
 
-	v.metrics = append(v.metrics, MetricFamilyWithPos{MetricFamily: &currentMetric, Pos: optsPosition})
+	v.addMetric(&MetricFamilyWithPos{MetricFamily: &currentMetric, Pos: optsPosition})
 	return v
 }
 
@@ -332,7 +352,8 @@ func (v *visitor) parseKSMMetrics(nameArg ast.Node, helpArg ast.Node, metricType
 		}
 	}
 
-	v.metrics = append(v.metrics, MetricFamilyWithPos{MetricFamily: &currentMetric, Pos: optsPosition})
+	v.addMetric(&MetricFamilyWithPos{MetricFamily: &currentMetric, Pos: optsPosition})
+
 	return v
 }
 
@@ -398,7 +419,7 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		metric.Type = &metricType
 	}
 
-	v.metrics = append(v.metrics, MetricFamilyWithPos{MetricFamily: metric, Pos: v.fs.Position(call.Pos())})
+	v.addMetric(&MetricFamilyWithPos{MetricFamily: metric, Pos: v.fs.Position(call.Pos())})
 	return v
 }
 
