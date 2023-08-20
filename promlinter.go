@@ -551,8 +551,6 @@ func (v *visitor) parseValue(object string, n ast.Node) (string, bool) {
 
 	// make sure it is string literal value
 	case *ast.BasicLit:
-		//log.Printf("object %q: t.Value: %s, token: %v", object, t.Value, t.Kind)
-
 		if t.Kind == token.STRING {
 			return mustUnquote(t.Value), true
 		}

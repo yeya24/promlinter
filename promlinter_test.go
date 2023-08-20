@@ -15,6 +15,7 @@ func TestRun(t *testing.T) {
 	}
 
 	issues := RunLint(fs, []*ast.File{file}, Setting{Strict: false, DisabledLintFuncs: nil})
+
 	if len(issues) != 7 {
 		t.Fatalf("expect 7 issue, got %d", len(issues))
 	}
