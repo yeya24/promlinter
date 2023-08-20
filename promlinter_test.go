@@ -16,7 +16,7 @@ func TestRun(t *testing.T) {
 
 	issues := RunLint(fs, []*ast.File{file}, Setting{Strict: false, DisabledLintFuncs: nil})
 	if len(issues) != 7 {
-		t.Fatal()
+		t.Fatalf("expect 7 issue, got %d", len(issues))
 	}
 
 	if issues[0].Metric != "kube_daemonset_labels" && issues[0].Text != `counter metrics should have "_total" suffix` {

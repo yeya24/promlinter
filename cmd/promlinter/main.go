@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,9 +54,15 @@ var (
 	withVendor *bool
 )
 
+func init() {
+	// To see the log position, added for debugging.
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+}
+
 func main() {
+
 	app := kingpin.New(filepath.Base(os.Args[0]), help)
-	app.Version("v0.0.2")
+	app.Version("v0.0.3")
 	app.HelpFlag.Short('h')
 
 	listCmd := app.Command("list", "List metrics name.")

@@ -3,9 +3,9 @@
 package testdata
 
 import (
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"k8s.io/component-base/metrics"
 	"k8s.io/kube-state-metrics/v2/pkg/metric"
 	generator "k8s.io/kube-state-metrics/v2/pkg/metric_generator"
 )
@@ -72,6 +72,24 @@ func main() {
 		}, nil,
 	)
 	ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, 1)
+
+	// good: const labels
+	var (
+		constLabelVal2 = "value2"
+	)
+	descConstLabel := prometheus.NewDesc(
+		"prometheus_operator_spec_replicas",
+		"Number of expected replicas for the object.",
+		[]string{
+			"namespace",
+			"name",
+		},
+		map[string]string{
+			"const-label1": "value1",
+			"const-label2": constLabelVal2,
+		},
+	)
+	ch <- prometheus.MustNewConstMetric(descConstLabel, prometheus.GaugeValue, 1)
 
 	// support using BuildFQName to generate fqName here.
 	// bad metric, gauge shouldn't have _total

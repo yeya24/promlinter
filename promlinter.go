@@ -86,7 +86,14 @@ func (m *MetricFamilyWithPos) Labels() []string {
 	var arr []string
 	if len(m.MetricFamily.Metric) > 0 {
 		for _, label := range m.MetricFamily.Metric[0].Label {
-			arr = append(arr, strings.Trim(*label.Name, `"`))
+			if label.Value != nil {
+				arr = append(arr,
+					fmt.Sprintf("%s=%s",
+						strings.Trim(*label.Name, `"`),
+						strings.Trim(*label.Value, `"`)))
+			} else {
+				arr = append(arr, strings.Trim(*label.Name, `"`))
+			}
 		}
 	}
 	return arr
@@ -100,10 +107,12 @@ type visitor struct {
 }
 
 type opt struct {
-	namespace string
-	subsystem string
-	name      string
-	labels    []string
+	namespace   string
+	subsystem   string
+	name        string
+	help        string
+	labels      []string
+	constLabels map[string]string
 }
 
 func RunList(fs *token.FileSet, files []*ast.File, strict bool) []MetricFamilyWithPos {
@@ -285,12 +294,12 @@ func (v *visitor) parseCallerExpr(call *ast.CallExpr) ast.Visitor {
 func (v *visitor) parseOpts(optArgs []ast.Expr, metricType dto.MetricType) ast.Visitor {
 	// position for the first arg of the CallExpr
 	optsPosition := v.fs.Position(optArgs[0].Pos())
-	opts, help := v.parseOptsExpr(optArgs[0])
+	opts := v.parseOptsExpr(optArgs[0])
 
 	var metric *dto.Metric
 	if len(optArgs) > 1 {
 		// parse labels
-		if labelOpts, _ := v.parseOptsExpr(optArgs[1]); labelOpts != nil && len(labelOpts.labels) > 0 {
+		if labelOpts := v.parseOptsExpr(optArgs[1]); labelOpts != nil && len(labelOpts.labels) > 0 {
 			metric = &dto.Metric{}
 			for idx, _ := range labelOpts.labels {
 				metric.Label = append(metric.Label,
@@ -307,7 +316,7 @@ func (v *visitor) parseOpts(optArgs []ast.Expr, metricType dto.MetricType) ast.V
 
 	currentMetric := dto.MetricFamily{
 		Type: &metricType,
-		Help: help,
+		Help: &opts.help,
 	}
 
 	if metric != nil {
@@ -393,15 +402,36 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		return v
 	}
 
-	name, help := v.parseConstMetricOptsExpr(call.Args[0])
-	if name == nil {
+	descCall := v.parseConstMetricOptsExpr(call.Args[0])
+	if descCall == nil {
 		return v
 	}
 
 	metric := &dto.MetricFamily{
-		Name: name,
-		Help: help,
+		Name: descCall.name,
+		Help: descCall.help,
 	}
+
+	if len(descCall.labels) > 0 {
+		m := &dto.Metric{}
+		for idx, _ := range descCall.labels {
+			m.Label = append(m.Label,
+				&dto.LabelPair{
+					Name: &descCall.labels[idx],
+				})
+		}
+
+		for idx, _ := range descCall.constLabels {
+			m.Label = append(m.Label,
+				&dto.LabelPair{
+					Name:  &descCall.constLabels[idx][0],
+					Value: &descCall.constLabels[idx][1],
+				})
+		}
+
+		metric.Metric = append(metric.Metric, m)
+	}
+
 	switch methodName {
 	case "MustNewConstMetric", "NewLazyConstMetric":
 		switch t := call.Args[1].(type) {
@@ -423,7 +453,7 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 	return v
 }
 
-func (v *visitor) parseOptsExpr(n ast.Node) (*opt, *string) {
+func (v *visitor) parseOptsExpr(n ast.Node) *opt {
 	switch stmt := n.(type) {
 	case *ast.CompositeLit:
 		return v.parseCompositeOpts(stmt)
@@ -441,24 +471,50 @@ func (v *visitor) parseOptsExpr(n ast.Node) (*opt, *string) {
 		return v.parseOptsExpr(stmt.X)
 	}
 
-	return nil, nil
+	return nil
 }
 
-func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) (*opt, *string) {
+func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) *opt {
 	metricOption := &opt{}
-	var help *string
 
 	for _, elt := range stmt.Elts {
 
+		// labels
 		label, ok := elt.(*ast.BasicLit)
 		if ok {
-			metricOption.labels = append(metricOption.labels, label.Value)
+			metricOption.labels = append(metricOption.labels, strings.Trim(label.Value, `"`))
+			continue
+			// go down
 		}
 
 		kvExpr, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
 			continue
 		}
+
+		// const labels
+		if key, ok := kvExpr.Key.(*ast.BasicLit); ok {
+
+			if metricOption.constLabels == nil {
+				metricOption.constLabels = map[string]string{}
+			}
+
+			// only accept literal string value
+			//
+			//  {
+			//  	"key": "some-string-literal",
+			//  }
+			switch val := kvExpr.Value.(type) {
+			case *ast.BasicLit:
+				metricOption.constLabels[key.Value] = val.Value
+
+			default:
+				metricOption.constLabels[key.Value] = "?" // use a placeholder for the const label
+			}
+
+			continue
+		}
+
 		object, ok := kvExpr.Key.(*ast.Ident)
 		if !ok {
 			continue
@@ -471,7 +527,7 @@ func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) (*opt, *string) {
 		// If failed to parse field value, stop parsing.
 		stringLiteral, ok := v.parseValue(object.Name, kvExpr.Value)
 		if !ok {
-			return nil, nil
+			return nil
 		}
 
 		switch object.Name {
@@ -482,18 +538,21 @@ func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) (*opt, *string) {
 		case "Name":
 			metricOption.name = stringLiteral
 		case "Help":
-			help = &stringLiteral
+			metricOption.help = stringLiteral
 		}
 	}
 
-	return metricOption, help
+	return metricOption
 }
 
 func (v *visitor) parseValue(object string, n ast.Node) (string, bool) {
+
 	switch t := n.(type) {
 
 	// make sure it is string literal value
 	case *ast.BasicLit:
+		//log.Printf("object %q: t.Value: %s, token: %v", object, t.Value, t.Kind)
+
 		if t.Kind == token.STRING {
 			return mustUnquote(t.Value), true
 		}
@@ -505,14 +564,26 @@ func (v *visitor) parseValue(object string, n ast.Node) (string, bool) {
 			return "", false
 		}
 
-		if vs, ok := t.Obj.Decl.(*ast.ValueSpec); ok {
+		switch vs := t.Obj.Decl.(type) {
+
+		case *ast.ValueSpec:
+			// var some string = "some string"
 			return v.parseValue(object, vs)
+
+		case *ast.AssignStmt:
+			// TODO:
+			// some := "some string"
+			return "", false
+
+		default:
+			return "", false
 		}
 
 	case *ast.ValueSpec:
 		if len(t.Values) == 0 {
 			return "", false
 		}
+
 		return v.parseValue(object, t.Values[0])
 
 	// For binary expr, we only support adding two strings like `foo` + `bar`.
@@ -592,7 +663,7 @@ func (v *visitor) parseValueCallExpr(object string, call *ast.CallExpr) (string,
 	return "", false
 }
 
-func (v *visitor) parseConstMetricOptsExpr(n ast.Node) (*string, *string) {
+func (v *visitor) parseConstMetricOptsExpr(n ast.Node) *descCallExpr {
 	switch stmt := n.(type) {
 	case *ast.CallExpr:
 		return v.parseNewDescCallExpr(stmt)
@@ -633,10 +704,16 @@ func (v *visitor) parseConstMetricOptsExpr(n ast.Node) (*string, *string) {
 		}
 	}
 
-	return nil, nil
+	return nil
 }
 
-func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
+type descCallExpr struct {
+	name, help  *string
+	labels      []string
+	constLabels [][2]string
+}
+
+func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) *descCallExpr {
 	var (
 		help string
 		name string
@@ -653,7 +730,7 @@ func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
 					Text:   fmt.Sprintf("parsing desc with function %s is not supported", expr.Name),
 				})
 			}
-			return nil, nil
+			return nil
 		}
 	case *ast.SelectorExpr:
 		if expr.Sel.Name != "NewDesc" {
@@ -664,7 +741,7 @@ func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
 					Text:   fmt.Sprintf("parsing desc with function %s is not supported", expr.Sel.Name),
 				})
 			}
-			return nil, nil
+			return nil
 		}
 	default:
 		if v.strict {
@@ -674,7 +751,7 @@ func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
 				Text:   fmt.Sprintf("parsing desc of %T is not supported", expr),
 			})
 		}
-		return nil, nil
+		return nil
 	}
 
 	// k8s.io/component-base/metrics.NewDesc has 6 args
@@ -685,19 +762,45 @@ func (v *visitor) parseNewDescCallExpr(call *ast.CallExpr) (*string, *string) {
 			Pos:    v.fs.Position(call.Pos()),
 			Text:   "NewDesc should have at least 4 args",
 		})
-		return nil, nil
+		return nil
 	}
 
 	name, ok = v.parseValue("fqName", call.Args[0])
 	if !ok {
-		return nil, nil
-	}
-	help, ok = v.parseValue("help", call.Args[1])
-	if !ok {
-		return nil, nil
+		return nil
 	}
 
-	return &name, &help
+	help, ok = v.parseValue("help", call.Args[1])
+	if !ok {
+		return nil
+	}
+
+	res := &descCallExpr{
+		name: &name,
+		help: &help,
+	}
+
+	if x, ok := call.Args[2].(*ast.CompositeLit); ok {
+		opt := v.parseCompositeOpts(x)
+		if opt == nil {
+			return nil
+		}
+
+		res.labels = opt.labels
+	}
+
+	if x, ok := call.Args[3].(*ast.CompositeLit); ok {
+		opt := v.parseCompositeOpts(x)
+		if opt == nil {
+			return nil
+		}
+
+		for k, v := range opt.constLabels {
+			res.constLabels = append(res.constLabels, [2]string{k, v})
+		}
+	}
+
+	return res
 }
 
 func mustUnquote(str string) string {
