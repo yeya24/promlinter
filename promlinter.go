@@ -402,6 +402,10 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		return v
 	}
 
+	if len(call.Args) == 0 {
+		return v
+	}
+
 	descCall := v.parseConstMetricOptsExpr(call.Args[0])
 	if descCall == nil {
 		return v

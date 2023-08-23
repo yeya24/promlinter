@@ -69,7 +69,10 @@ func main() {
 	listPaths := listCmd.Arg("files", "Files to parse metrics.").Strings()
 	listStrict := listCmd.Flag("strict", "Strict mode. If true, linter will output more issues including parsing failures.").
 		Default("false").Short('s').Bool()
+
 	listPrintAddPos := listCmd.Flag("add-position", "Add metric position column when printing the result.").Default("false").Bool()
+	listPrintAddModule := listCmd.Flag("add-module", "Add metric module column when printing the result.").Default("false").Bool()
+
 	listPrintAddHelp := listCmd.Flag("add-help", "Add metric help column when printing the result.").Default("false").Bool()
 	listPrintFormat := listCmd.Flag("output", "Print result formatted as JSON/YAML/Markdown").Short('o').Enum("yaml", "json", "md")
 
@@ -94,6 +97,7 @@ func main() {
 			fmt:         *listPrintFormat,
 			addHelp:     *listPrintAddHelp,
 			addPosition: *listPrintAddPos,
+			addModule:   *listPrintAddModule,
 			metrics:     metrics,
 		}
 
@@ -165,7 +169,7 @@ func (p *printer) printDefault() {
 		fields []string
 	)
 
-	if p.addPosition {
+	if p.addPosition || p.addModule {
 		fields = []string{
 			"POSITION", "TYPE", "NAME", "LABELS",
 		}
@@ -209,17 +213,17 @@ func (p *printer) printDefault() {
 			labels = fmt.Sprintf("`%s`", labels)
 		}
 
-		if p.addPosition && p.addHelp {
+		if (p.addPosition || p.addModule) && p.addHelp {
 			lineArr = []string{
-				m.Pos.String(),
+				p.pos(m.Pos.String()),
 				MetricType[int32(*m.MetricFamily.Type)],
 				mname,
 				labels,
 				help,
 			}
-		} else if p.addPosition {
+		} else if p.addPosition || p.addModule {
 			lineArr = []string{
-				m.Pos.String(),
+				p.pos(m.Pos.String()),
 				MetricType[int32(*m.MetricFamily.Type)],
 				mname,
 				labels,
@@ -249,9 +253,22 @@ func (p *printer) printDefault() {
 }
 
 type printer struct {
-	fmt                  string
-	addHelp, addPosition bool
-	metrics              []promlinter.MetricFamilyWithPos
+	fmt                             string
+	addHelp, addPosition, addModule bool
+	metrics                         []promlinter.MetricFamilyWithPos
+}
+
+func (p *printer) pos(pos string) (x string) {
+	if p.addModule {
+		x = filepath.Dir(pos)
+	} else {
+		x = pos
+	}
+
+	if p.fmt == "md" {
+		return fmt.Sprintf("*%s*", x) // italic file path
+	}
+	return
 }
 
 func (p *printer) printMetrics() {
