@@ -16,7 +16,6 @@ var (
 )
 
 func main() {
-	ch := make(chan<- prometheus.Metric)
 
 	// counter metric should have _total suffix
 	_ = promauto.NewCounterVec(
@@ -71,6 +70,8 @@ func main() {
 			"name",
 		}, nil,
 	)
+
+	ch := make(chan<- prometheus.Metric)
 	ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, 1)
 
 	// good: const labels
@@ -78,7 +79,7 @@ func main() {
 		constLabelVal2 = "value2"
 	)
 	descConstLabel := prometheus.NewDesc(
-		"prometheus_operator_spec_replicas",
+		"prometheus_operator_spec_replicas_with_const_labels",
 		"Number of expected replicas for the object.",
 		[]string{
 			"namespace",
