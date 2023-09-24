@@ -79,7 +79,7 @@ func main() {
 		constLabelVal2 = "value2"
 	)
 	descConstLabel := prometheus.NewDesc(
-		"prometheus_operator_spec_replicas_with_const_labels",
+		"prometheus_operator_spec_replicas",
 		"Number of expected replicas for the object.",
 		[]string{
 			"namespace",

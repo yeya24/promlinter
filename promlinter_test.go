@@ -5,6 +5,8 @@ import (
 	"go/parser"
 	"go/token"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRun(t *testing.T) {
@@ -20,31 +22,26 @@ func TestRun(t *testing.T) {
 		t.Fatalf("expect 7 issue, got %d, issues: %+#v", len(issues), issues)
 	}
 
-	if issues[0].Metric != "kube_daemonset_labels" && issues[0].Text != `counter metrics should have "_total" suffix` {
-		t.Fatal()
-	}
+	for idx, iss := range issues {
+		t.Logf("%d: %q", idx, iss)
 
-	if issues[1].Metric != "test_metric_name" && issues[1].Text != `counter metrics should have "_total" suffix` {
-		t.Fatal()
-	}
+		switch iss.Metric {
+		case "kube_daemonset_labels", "test_metric_name", "foo":
+			assert.Equal(t, iss.Text, `counter metrics should have "_total" suffix`)
 
-	if issues[2].Metric != "test_metric_total" && issues[2].Text != `no help text` {
-		t.Fatal()
-	}
+		case "test_metric_total":
+			assert.Equal(t, iss.Text, `no help text`)
 
-	if issues[3].Metric != "foo" && issues[3].Text != `counter metrics should have "_total" suffix` {
-		t.Fatal()
-	}
+		case "foo_bar_total":
+			assert.Equal(t, iss.Text, `non-counter metrics should not have "_total" suffix`)
 
-	if issues[4].Metric != "foo_bar_total" && issues[4].Text != `non-counter metrics should not have "_total" suffix` {
-		t.Fatal()
-	}
+		case "kube_test_metric_count":
+			assert.Equal(t, iss.Text, `non-histogram and non-summary metrics should not have "_count" suffix`)
+		case "test_histogram_duration_seconds":
+			assert.Equal(t, iss.Text, `metric name should not include type 'histogram'`)
 
-	if issues[5].Metric != "kube_test_metric_count" && issues[5].Text != `non-histogram and non-summary metrics should not have "_count" suffix` {
-		t.Fatal()
-	}
-
-	if issues[6].Metric != "test_histogram_duration_seconds" && issues[6].Text != `metric name should not include type 'histogram'` {
-		t.Fatal()
+		default:
+			assert.Truef(t, false, "unexpected issue: %q", iss)
+		}
 	}
 }

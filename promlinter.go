@@ -108,10 +108,13 @@ type visitor struct {
 }
 
 type opt struct {
-	namespace   string
-	subsystem   string
-	name        string
-	help        string
+	namespace string
+	subsystem string
+	name      string
+
+	help    string
+	helpSet bool
+
 	labels      []string
 	constLabels map[string]string
 }
@@ -153,7 +156,7 @@ func RunLint(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 			panic(err)
 		}
 
-		log.Printf("problems on %d(%q): %+#v", idx, mfp, problems)
+		log.Printf("problems on %d(%q)\n\t==> %q", idx, mfp.MetricFamily, problems)
 
 		for _, p := range problems {
 			for _, disabledFunc := range s.DisabledLintFuncs {
@@ -319,7 +322,12 @@ func (v *visitor) parseOpts(optArgs []ast.Expr, metricType dto.MetricType) ast.V
 
 	currentMetric := dto.MetricFamily{
 		Type: &metricType,
-		Help: &opts.help,
+	}
+
+	if !opts.helpSet {
+		currentMetric.Help = nil
+	} else {
+		currentMetric.Help = &opts.help
 	}
 
 	if metric != nil {
@@ -546,6 +554,7 @@ func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) *opt {
 			metricOption.name = stringLiteral
 		case "Help":
 			metricOption.help = stringLiteral
+			metricOption.helpSet = true
 		}
 	}
 
