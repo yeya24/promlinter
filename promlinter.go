@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -155,8 +154,6 @@ func RunLint(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 		if err != nil {
 			panic(err)
 		}
-
-		log.Printf("problems on %d(%q)\n\t==> %q", idx, mfp.MetricFamily, problems)
 
 		for _, p := range problems {
 			for _, disabledFunc := range s.DisabledLintFuncs {
