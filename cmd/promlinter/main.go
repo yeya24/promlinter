@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,26 +43,40 @@ It is also supported to disable the lint functions using repeated flag --disable
 	[UnitAbbreviations]: UnitAbbreviations detects abbreviated units in the metric name.
 `
 
-var MetricType = map[int32]string{
-	0: "COUNTER",
-	1: "GAUGE",
-	2: "SUMMARY",
-	3: "UNTYPED",
-	4: "HISTOGRAM",
+var (
+	MetricType = map[int32]string{
+		0: "COUNTER",
+		1: "GAUGE",
+		2: "SUMMARY",
+		3: "UNTYPED",
+		4: "HISTOGRAM",
+	}
+	withVendor *bool
+)
+
+func init() {
+	// To see the log position, added for debugging.
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
 func main() {
+
 	app := kingpin.New(filepath.Base(os.Args[0]), help)
-	app.Version("v0.0.2")
+	app.Version("v0.0.3")
 	app.HelpFlag.Short('h')
 
 	listCmd := app.Command("list", "List metrics name.")
 	listPaths := listCmd.Arg("files", "Files to parse metrics.").Strings()
 	listStrict := listCmd.Flag("strict", "Strict mode. If true, linter will output more issues including parsing failures.").
 		Default("false").Short('s').Bool()
+
 	listPrintAddPos := listCmd.Flag("add-position", "Add metric position column when printing the result.").Default("false").Bool()
+	listPrintAddModule := listCmd.Flag("add-module", "Add metric module column when printing the result.").Default("false").Bool()
+
 	listPrintAddHelp := listCmd.Flag("add-help", "Add metric help column when printing the result.").Default("false").Bool()
-	listPrintFormat := listCmd.Flag("output", "Print result formatted as JSON/YAML").Short('o').Enum("yaml", "json")
+	listPrintFormat := listCmd.Flag("output", "Print result formatted as JSON/YAML/Markdown").Short('o').Enum("yaml", "json", "md")
+
+	withVendor = listCmd.Flag("with-vendor", "Scan vendor packages.").Default("false").Bool()
 
 	lintCmd := app.Command("lint", "Lint metrics via promlint.")
 	lintPaths := lintCmd.Arg("files", "Files to parse metrics.").Strings()
@@ -78,7 +93,15 @@ func main() {
 	switch parsedCmd {
 	case listCmd.FullCommand():
 		metrics := promlinter.RunList(fileSet, findFiles(*listPaths, fileSet), *listStrict)
-		printMetrics(metrics, *listPrintAddPos, *listPrintAddHelp, *listPrintFormat)
+		p := printer{
+			fmt:         *listPrintFormat,
+			addHelp:     *listPrintAddHelp,
+			addPosition: *listPrintAddPos,
+			addModule:   *listPrintAddModule,
+			metrics:     metrics,
+		}
+
+		p.printMetrics()
 	case lintCmd.FullCommand():
 		setting := promlinter.Setting{Strict: *lintStrict, DisabledLintFuncs: *disableLintFuncs}
 		for _, iss := range promlinter.RunLint(fileSet, findFiles(*lintPaths, fileSet), setting) {
@@ -114,9 +137,11 @@ func walkDir(root string) chan string {
 		defer close(out)
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			sep := string(filepath.Separator)
-			if strings.HasPrefix(path, "vendor"+sep) || strings.Contains(path, sep+"vendor"+sep) {
+			if withVendor != nil && !*withVendor &&
+				(strings.HasPrefix(path, "vendor"+sep) || strings.Contains(path, sep+"vendor"+sep)) {
 				return nil
 			}
+
 			if !info.IsDir() && !strings.HasSuffix(info.Name(), "_test.go") &&
 				strings.HasSuffix(info.Name(), ".go") {
 				out <- path
@@ -131,48 +156,137 @@ func walkDir(root string) chan string {
 	return out
 }
 
-func printMetrics(metrics []promlinter.MetricFamilyWithPos, addPosition, addHelp bool, printFormat string) {
-	if len(printFormat) > 0 {
-		if printFormat == "json" {
-			printAsJson(metrics)
-			return
-		}
-		if printFormat == "yaml" {
-			printAsYaml(metrics)
-			return
-		}
-	}
+func (p *printer) printDefault() {
 	tw := tabwriter.NewWriter(os.Stdout, 20, 1, 3, ' ', 0)
 	defer tw.Flush()
 
-	var header string
-	if addPosition {
-		header = "POSITION\tTYPE\tNAME"
+	fieldSep := "\t"
+	if p.fmt == "md" {
+		fieldSep = "|"
+	}
+
+	var (
+		fields []string
+	)
+
+	if p.addPosition || p.addModule {
+		fields = []string{
+			"POSITION", "TYPE", "NAME", "LABELS",
+		}
 	} else {
-		header = "TYPE\tNAME"
+		fields = []string{
+			"TYPE", "NAME", "LABELS",
+		}
 	}
 
-	if addHelp {
-		header += "\tHELP"
+	if p.addHelp {
+		fields = append(fields, "HELP")
 	}
 
-	fmt.Fprintln(tw, header)
+	if p.fmt == "md" {
+		fmt.Fprintf(tw, "|%s|\n", strings.Join(fields, fieldSep))
+	} else {
+		fmt.Fprintf(tw, "%s\n", strings.Join(fields, fieldSep))
+	}
 
-	for _, m := range metrics {
-		if addPosition && addHelp {
-			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\n", m.Pos, MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name, *m.MetricFamily.Help)
-		} else if addPosition {
-			fmt.Fprintf(tw, "%v\t%v\t%v\n", m.Pos, MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name)
-		} else if addHelp {
-			fmt.Fprintf(tw, "%v\t%v\t%v\n", MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name, *m.MetricFamily.Help)
+	if p.fmt == "md" {
+		fmt.Fprintf(tw, "%s|\n", strings.Repeat("|---", len(fields)))
+	}
+
+	for _, m := range p.metrics {
+
+		help := "N/A"
+		if m.MetricFamily.Help != nil {
+			help = *m.MetricFamily.Help
+		}
+
+		labels := strings.Join(m.Labels(), ",")
+		if labels == "" {
+			labels = "N/A"
+		}
+
+		var lineArr []string
+
+		mname := *m.MetricFamily.Name
+		if p.fmt == "md" {
+			mname = fmt.Sprintf("`%s`", *m.MetricFamily.Name)
+			labels = fmt.Sprintf("`%s`", labels)
+		}
+
+		if (p.addPosition || p.addModule) && p.addHelp {
+			lineArr = []string{
+				p.pos(m.Pos.String()),
+				MetricType[int32(*m.MetricFamily.Type)],
+				mname,
+				labels,
+				help,
+			}
+		} else if p.addPosition || p.addModule {
+			lineArr = []string{
+				p.pos(m.Pos.String()),
+				MetricType[int32(*m.MetricFamily.Type)],
+				mname,
+				labels,
+			}
+
+		} else if p.addHelp {
+			lineArr = []string{
+				MetricType[int32(*m.MetricFamily.Type)],
+				mname,
+				labels,
+				help,
+			}
 		} else {
-			fmt.Fprintf(tw, "%v\t%v\n", MetricType[int32(*m.MetricFamily.Type)], *m.MetricFamily.Name)
+			lineArr = []string{
+				MetricType[int32(*m.MetricFamily.Type)],
+				mname,
+				labels,
+			}
+		}
+
+		if p.fmt == "md" {
+			fmt.Fprintf(tw, "|%s|\n", strings.Join(lineArr, fieldSep))
+		} else {
+			fmt.Fprintf(tw, "%s\n", strings.Join(lineArr, fieldSep))
 		}
 	}
 }
 
-func printAsYaml(metrics []promlinter.MetricFamilyWithPos) {
-	b, err := yaml.Marshal(toPrint(metrics))
+type printer struct {
+	fmt                             string
+	addHelp, addPosition, addModule bool
+	metrics                         []promlinter.MetricFamilyWithPos
+}
+
+func (p *printer) pos(pos string) (x string) {
+	if p.addModule {
+		x = filepath.Dir(pos)
+	} else {
+		x = pos
+	}
+
+	if p.fmt == "md" {
+		return fmt.Sprintf("*%s*", x) // italic file path
+	}
+	return
+}
+
+func (p *printer) printMetrics() {
+	switch p.fmt {
+	case "json":
+		p.printAsJson()
+		return
+	case "yaml":
+		p.printAsYaml()
+		return
+	default:
+		p.printDefault()
+		return
+	}
+}
+
+func (p *printer) printAsYaml() {
+	b, err := yaml.Marshal(toPrint(p.metrics))
 	if err != nil {
 		fmt.Printf("Failed: %v", err)
 		os.Exit(1)
@@ -181,8 +295,8 @@ func printAsYaml(metrics []promlinter.MetricFamilyWithPos) {
 
 }
 
-func printAsJson(metrics []promlinter.MetricFamilyWithPos) {
-	b, err := json.Marshal(toPrint(metrics))
+func (p *printer) printAsJson() {
+	b, err := json.MarshalIndent(toPrint(p.metrics), "", "  ")
 	if err != nil {
 		fmt.Printf("Failed: %v", err)
 		os.Exit(1)
@@ -195,6 +309,7 @@ type MetricForPrinting struct {
 	Help     string
 	Type     string
 	Filename string
+	Labels   []string
 	Line     int
 	Column   int
 }
@@ -215,6 +330,16 @@ func toPrint(metrics []promlinter.MetricFamilyWithPos) []MetricForPrinting {
 			if m.MetricFamily.Help != nil {
 				h = *m.MetricFamily.Help
 			}
+
+			var labels []string
+			for _, m := range m.MetricFamily.Metric {
+				for idx, _ := range m.Label {
+					if m.Label[idx].Name != nil {
+						labels = append(labels, strings.Trim(*m.Label[idx].Name, `"`))
+					}
+				}
+			}
+
 			i := MetricForPrinting{
 				Name:     n,
 				Help:     h,
@@ -222,6 +347,7 @@ func toPrint(metrics []promlinter.MetricFamilyWithPos) []MetricForPrinting {
 				Filename: m.Pos.Filename,
 				Line:     m.Pos.Line,
 				Column:   m.Pos.Column,
+				Labels:   labels,
 			}
 			p = append(p, i)
 		}
