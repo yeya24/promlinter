@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -175,13 +174,6 @@ func RunLint(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 		}
 	}
 
-	for _, iss := range v.issues {
-		log.Printf("%s, pos: %s", iss.Metric, iss.Pos)
-	}
-
-	sort.Slice(v.issues, func(i, j int) bool {
-		return v.issues[i].Pos.String() < v.issues[j].Pos.String()
-	})
 	return v.issues
 }
 
