@@ -23,7 +23,7 @@ func TestRun(t *testing.T) {
 	}
 
 	for idx, iss := range issues {
-		t.Logf("%d: %q", idx, iss)
+		t.Logf("%d: %q: %s", idx, iss.Metric, iss.Pos)
 
 		switch iss.Metric {
 		case "kube_daemonset_labels", "test_metric_name", "foo":

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -149,7 +150,7 @@ func RunLint(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 	}
 
 	// lint metrics
-	for idx, mfp := range v.metrics {
+	for _, mfp := range v.metrics {
 		problems, err := promlint.NewWithMetricFamilies([]*dto.MetricFamily{mfp.MetricFamily}).Lint()
 		if err != nil {
 			panic(err)
@@ -172,6 +173,10 @@ func RunLint(fs *token.FileSet, files []*ast.File, s Setting) []Issue {
 
 		END:
 		}
+	}
+
+	for _, iss := range v.issues {
+		log.Printf("%s, pos: %s", iss.Metric, iss.Pos)
 	}
 
 	sort.Slice(v.issues, func(i, j int) bool {
