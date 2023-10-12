@@ -496,7 +496,6 @@ func (v *visitor) parseCompositeOpts(stmt *ast.CompositeLit) *opt {
 		if ok {
 			metricOption.labels = append(metricOption.labels, strings.Trim(label.Value, `"`))
 			continue
-			// go down
 		}
 
 		kvExpr, ok := elt.(*ast.KeyValueExpr)
