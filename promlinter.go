@@ -347,6 +347,10 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 		return v
 	}
 
+	if len(call.Args) == 0 {
+		return v
+	}
+
 	name, help := v.parseConstMetricOptsExpr(call.Args[0])
 	if name == nil {
 		return v
