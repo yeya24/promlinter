@@ -84,15 +84,15 @@ type MetricFamilyWithPos struct {
 
 func (m *MetricFamilyWithPos) Labels() []string {
 	var arr []string
-	if len(m.MetricFamily.Metric) > 0 {
-		for _, label := range m.MetricFamily.Metric[0].Label {
+	if len(m.MetricFamily.GetMetric()) > 0 {
+		for _, label := range m.MetricFamily.Metric[0].GetLabel() {
 			if label.Value != nil {
 				arr = append(arr,
 					fmt.Sprintf("%s=%s",
-						strings.Trim(*label.Name, `"`),
-						strings.Trim(*label.Value, `"`)))
+						strings.Trim(label.GetName(), `"`),
+						strings.Trim(label.GetValue(), `"`)))
 			} else {
-				arr = append(arr, strings.Trim(*label.Name, `"`))
+				arr = append(arr, strings.Trim(label.GetName(), `"`))
 			}
 		}
 	}
@@ -301,7 +301,7 @@ func (v *visitor) parseOpts(optArgs []ast.Expr, metricType dto.MetricType) ast.V
 		// parse labels
 		if labelOpts := v.parseOptsExpr(optArgs[1]); labelOpts != nil && len(labelOpts.labels) > 0 {
 			metric = &dto.Metric{}
-			for idx, _ := range labelOpts.labels {
+			for idx := range labelOpts.labels {
 				metric.Label = append(metric.Label,
 					&dto.LabelPair{
 						Name: &labelOpts.labels[idx],
@@ -423,14 +423,14 @@ func (v *visitor) parseSendMetricChanExpr(chExpr *ast.SendStmt) ast.Visitor {
 
 	if len(descCall.labels) > 0 {
 		m := &dto.Metric{}
-		for idx, _ := range descCall.labels {
+		for idx := range descCall.labels {
 			m.Label = append(m.Label,
 				&dto.LabelPair{
 					Name: &descCall.labels[idx],
 				})
 		}
 
-		for idx, _ := range descCall.constLabels {
+		for idx := range descCall.constLabels {
 			m.Label = append(m.Label,
 				&dto.LabelPair{
 					Name:  &descCall.constLabels[idx][0],

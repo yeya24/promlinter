@@ -13,7 +13,7 @@ import (
 	"text/tabwriter"
 
 	"gopkg.in/alecthomas/kingpin.v2"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 
 	"github.com/yeya24/promlinter"
 )
@@ -196,7 +196,7 @@ func (p *printer) printDefault() {
 
 		help := "N/A"
 		if m.MetricFamily.Help != nil {
-			help = *m.MetricFamily.Help
+			help = m.MetricFamily.GetHelp()
 		}
 
 		labels := strings.Join(m.Labels(), ",")
@@ -206,16 +206,16 @@ func (p *printer) printDefault() {
 
 		var lineArr []string
 
-		mname := *m.MetricFamily.Name
+		mname := m.MetricFamily.GetName()
 		if p.fmt == "md" {
-			mname = fmt.Sprintf("`%s`", *m.MetricFamily.Name)
+			mname = fmt.Sprintf("`%s`", m.MetricFamily.GetName())
 			labels = fmt.Sprintf("`%s`", labels)
 		}
 
 		if (p.addPosition || p.addModule) && p.addHelp {
 			lineArr = []string{
 				p.pos(m.Pos.String()),
-				MetricType[int32(*m.MetricFamily.Type)],
+				MetricType[int32(m.MetricFamily.GetType())],
 				mname,
 				labels,
 				help,
@@ -223,21 +223,21 @@ func (p *printer) printDefault() {
 		} else if p.addPosition || p.addModule {
 			lineArr = []string{
 				p.pos(m.Pos.String()),
-				MetricType[int32(*m.MetricFamily.Type)],
+				MetricType[int32(m.MetricFamily.GetType())],
 				mname,
 				labels,
 			}
 
 		} else if p.addHelp {
 			lineArr = []string{
-				MetricType[int32(*m.MetricFamily.Type)],
+				MetricType[int32(m.MetricFamily.GetType())],
 				mname,
 				labels,
 				help,
 			}
 		} else {
 			lineArr = []string{
-				MetricType[int32(*m.MetricFamily.Type)],
+				MetricType[int32(m.MetricFamily.GetType())],
 				mname,
 				labels,
 			}
@@ -314,35 +314,27 @@ type MetricForPrinting struct {
 }
 
 func toPrint(metrics []promlinter.MetricFamilyWithPos) []MetricForPrinting {
-	p := []MetricForPrinting{}
+	var p []MetricForPrinting
+
 	for _, m := range metrics {
 		if m.MetricFamily != nil && *m.MetricFamily.Name != "" {
 			if m.MetricFamily.Type == nil {
 				continue
 			}
-			n := ""
-			h := ""
-
-			if m.MetricFamily.Name != nil {
-				n = *m.MetricFamily.Name
-			}
-			if m.MetricFamily.Help != nil {
-				h = *m.MetricFamily.Help
-			}
 
 			var labels []string
-			for _, m := range m.MetricFamily.Metric {
-				for idx, _ := range m.Label {
+			for _, m := range m.MetricFamily.GetMetric() {
+				for idx, _ := range m.GetLabel() {
 					if m.Label[idx].Name != nil {
-						labels = append(labels, strings.Trim(*m.Label[idx].Name, `"`))
+						labels = append(labels, strings.Trim(m.Label[idx].GetName(), `"`))
 					}
 				}
 			}
 
 			i := MetricForPrinting{
-				Name:     n,
-				Help:     h,
-				Type:     MetricType[int32(*m.MetricFamily.Type)],
+				Name:     m.MetricFamily.GetName(),
+				Help:     m.MetricFamily.GetHelp(),
+				Type:     MetricType[int32(m.MetricFamily.GetType())],
 				Filename: m.Pos.Filename,
 				Line:     m.Pos.Line,
 				Column:   m.Pos.Column,
