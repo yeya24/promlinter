@@ -60,9 +60,8 @@ func init() {
 }
 
 func main() {
-
 	app := kingpin.New(filepath.Base(os.Args[0]), help)
-	app.Version("v0.0.3")
+	app.Version("v0.3.0")
 	app.HelpFlag.Short('h')
 
 	listCmd := app.Command("list", "List metrics name.")
